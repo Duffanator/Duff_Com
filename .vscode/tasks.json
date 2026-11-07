@@ -1,0 +1,49 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "shell",
+            "label": "task-dosbox-build",
+            "command": "cmd.exe",
+            "args": [
+                "/c",
+                ".vscode\\build-debug.bat"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "type": "shell",
+            "label": "task-dosbox-debug",
+            "command": "${userHome}/.dos/dosbox-x/dosbox-x",
+            "args": [
+                "-conf",
+                "${userHome}/.dos/dosbox-x.conf",
+                "-fastlaunch",
+                "-exit",
+                "${workspaceFolder}/build/main.exe"
+            ],
+            "dependsOn": "task-dosbox-build",
+            "isBackground": true,
+            "problemMatcher": [
+                {
+                    "pattern": [
+                        {
+                            "regexp": ".",
+                            "file": 1,
+                            "location": 2,
+                            "message": 3
+                        }
+                    ],
+                    "background": {
+                        "activeOnStart": true,
+                        "beginsPattern": ".",
+                        "endsPattern": "."
+                    }
+                }
+            ]
+        }
+    ]
+}

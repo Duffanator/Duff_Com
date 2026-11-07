@@ -1,0 +1,31 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "node-terminal",
+            "name": "DOS Build & Run (DUFF-COM)",
+            "request": "launch",
+            "command": "./build_and_run.bat",
+            "windows": {
+                "name": "DOS Build & Run (DUFF-COM)",
+                "type": "node-terminal",
+                "request": "launch",
+                "command": "cmd.exe /c build_and_run.bat",
+                "cwd": "${workspaceFolder}"
+            }
+        },
+        {
+            "type": "gdb",
+            "request": "attach",
+            "name": "DOS Debug Target (GDB)",
+            "executable": "${workspaceFolder}/build/main.exe",
+            "target": "localhost:5123",
+            "remote": true,
+            "cwd": "${workspaceRoot}",
+            "gdbpath": "${userHome}/.dos/gdb/gdb",
+            "preLaunchTask": "task-dosbox-debug",
+            "stopAtConnect": true,
+            "internalConsoleOptions": "neverOpen"
+        }
+    ]
+}
