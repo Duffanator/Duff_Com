@@ -21,7 +21,7 @@ if not exist build\assets mkdir build\assets
 echo [1/2] Compiling DUFF-COM (32-bit Protected Mode MS-DOS)...
 "%DOS_DIR%\djgpp\bin\i586-pc-msdosdjgpp-gcc.exe" -O2 -Wall -std=gnu99 -DNDEBUG ^
     -I"%DOS_DIR%\djgpp\i586-pc-msdosdjgpp\sys-include" ^
-    src/main.c src/vga.c src/input.c src/sound.c src/music.c src/settings.c src/bmp_loader.c src/gfx_assets.c src/pathfind.c src/procgen.c src/isomap.c src/hud.c src/campaign.c ^
+    src/main.c src/vga.c src/input.c src/sound.c src/music.c src/settings.c src/bmp_loader.c src/gfx_assets.c src/operative.c src/pathfind.c src/procgen.c src/isomap.c src/hud.c src/campaign.c ^
     -lm -o dist/DUFFCOM.EXE
 
 if %ERRORLEVEL% NEQ 0 (

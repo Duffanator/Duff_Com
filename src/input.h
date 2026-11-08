@@ -39,6 +39,7 @@ enum {
 
 void input_init(void);
 void input_poll(void);
+void input_flush(void);
 void input_draw_cursor(void);
 void input_draw_cursor_ex(int cursor_mode);
 

@@ -19,9 +19,13 @@ static int check_ortho_edge(int x0, int y0, int z, int x1, int y1) {
     } else if (y1 < y0) {
         w = g_map[z][y0][x0].wall_north;
     }
-    if (w == WALL_DOOR_CLOSED) return 2;
+    if (isomap_is_door_closed(w)) return 2;
     if (!isomap_wall_blocks_move(w)) return 1;
     return 0;
+}
+
+static int is_walkable_obj(uint8_t obj_id) {
+    return (obj_id == OBJ_NONE || isomap_is_lift_obj(obj_id) || obj_id == OBJ_RUBBLE);
 }
 
 int pathfind_can_step(int x0, int y0, int z0, int x1, int y1, int z1, int can_fly, int *out_cost) {
@@ -36,18 +40,18 @@ int pathfind_can_step(int x0, int y0, int z0, int x1, int y1, int z1, int can_fl
 
     /* Destination cannot already be occupied by another unit or blocking prop */
     if (dst->unit_idx != -1) return 0;
-    if (dst->obj_id != OBJ_NONE && dst->obj_id != OBJ_STAIRS_UP && dst->obj_id != OBJ_RUBBLE) {
+    if (!is_walkable_obj(dst->obj_id)) {
         return 0;
     }
 
-    /* Vertical transition: check staircases FIRST so both ground & flying units can use indoor stairs! */
+    /* Vertical transition: check staircases & UFO grav-lifts FIRST so ground & flying units can use them! */
     if (dz != 0) {
         if (dx != 0 || dy != 0 || abs(dz) != 1) return 0;
-        if (dz == 1 && g_map[z0][y0][x0].obj_id == OBJ_STAIRS_UP) {
+        if (dz == 1 && isomap_is_lift_obj(g_map[z0][y0][x0].obj_id)) {
             if (out_cost) *out_cost = can_fly ? 4 : 6;
             return 1;
         }
-        if (dz == -1 && g_map[z1][y1][x1].obj_id == OBJ_STAIRS_UP) {
+        if (dz == -1 && isomap_is_lift_obj(g_map[z1][y1][x1].obj_id)) {
             if (out_cost) *out_cost = can_fly ? 4 : 6;
             return 1;
         }
@@ -63,22 +67,25 @@ int pathfind_can_step(int x0, int y0, int z0, int x1, int y1, int z1, int can_fl
 
     /* Horizontal move on same level z0 */
     if (!can_fly) {
-        int has_stair_below = (z1 > 0 && g_map[z1 - 1][y1][x1].obj_id == OBJ_STAIRS_UP);
+        int has_stair_below = (z1 > 0 && isomap_is_lift_obj(g_map[z1 - 1][y1][x1].obj_id));
         if (dst->floor_id == FLOOR_NONE && !has_stair_below) return 0;
     }
 
     /* Check blocking props on destination tile */
-    if (dst->obj_id != OBJ_NONE && dst->obj_id != OBJ_STAIRS_UP && dst->obj_id != OBJ_RUBBLE) {
+    if (!is_walkable_obj(dst->obj_id)) {
         return 0;
     }
 
     if (dx != 0 && dy != 0) {
-        /* Diagonal step: prevent corner-clipping through walls */
+        /* Diagonal step: prevent corner-clipping through walls or pinched corner hull props */
         int e1 = check_ortho_edge(x0, y0, z0, x1, y0);
         int e2 = check_ortho_edge(x0, y0, z0, x0, y1);
         int e3 = check_ortho_edge(x1, y0, z0, x1, y1);
         int e4 = check_ortho_edge(x0, y1, z0, x1, y1);
+        int a_open = is_walkable_obj(g_map[z0][y0][x1].obj_id);
+        int b_open = is_walkable_obj(g_map[z0][y1][x0].obj_id);
         if (!e1 || !e2 || !e3 || !e4) return 0;
+        if (!a_open && !b_open) return 0;
         cost = 6;
         if (e1 == 2 || e2 == 2 || e3 == 2 || e4 == 2) cost += 2;
     } else {

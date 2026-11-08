@@ -1,3 +1,4 @@
+param([switch]$ObjectsOnly)
 Add-Type -AssemblyName System.Drawing
 
 $csharp = @"
@@ -80,13 +81,98 @@ public class DuffArtGen {
         GenRadar(Path.Combine(assetsDir, "RADAR.BMP"));
     }
 
+    static Color UfoHullShade(int z, double light, int arcHash, bool damaged, int x, int y) {
+        // Vertical convex C-curve saucer profile (z = 0 bottom underbelly .. 23 upper dome rim)
+        // light in [0.0 .. 1.0]: 1.0 = sunlit West-facing normal, 0.25 = shaded North-facing normal
+        double L = 0.62 + 0.38 * light;
+        Color c;
+        if (z == 23) {
+            int r = (int)(210 * L), g = (int)(222 * L), b = (int)(248 * L);
+            return Color.FromArgb(Math.Min(255, r), Math.Min(255, g), Math.Min(255, b));
+        }
+        if (z >= 11 && z <= 13) {
+            // Recessed saucer equator channel + glowing Neon Cyan / Elerium plasma field trim!
+            if (z == 12) {
+                if (damaged && x >= 5 && x <= 10) {
+                    return (x == 7 || x == 8) ? Color.FromArgb(255, 228, 55) : Color.FromArgb(34, 24, 48);
+                }
+                bool node = (arcHash % 6 == 0);
+                return node ? Color.FromArgb(168, 252, 56) : Color.FromArgb(76, 248, 252);
+            }
+            return Color.FromArgb((int)(46 * L), (int)(40 * L), (int)(86 * L));
+        }
+        if (z >= 14) {
+            // Upper convex saucer dome slope: pearlescent blue-silver -> lavender-titanium
+            double t = (z - 14) / 8.0; // 0 at equator, 1 at top rim
+            double r = (138 + 68 * t) * L;
+            double g = (128 + 84 * t) * L;
+            double b = (188 + 58 * t) * L;
+            if (arcHash == 0) { r *= 0.76; g *= 0.76; b *= 0.82; } // Curved C-shaped hull rib seam!
+            c = Color.FromArgb(Math.Min(255, (int)r), Math.Min(255, (int)g), Math.Min(255, (int)b));
+        } else {
+            // Lower tucked saucer underbelly: curves sharply into deep alien violet-indigo shadow!
+            double t = z / 10.0; // 0 at base, 1 just below equator
+            double curve = t * t;
+            double r = (36 + 96 * curve) * L;
+            double g = (18 + 78 * curve) * L;
+            double b = (56 + 122 * curve) * L;
+            if (arcHash == 0) { r *= 0.78; g *= 0.78; b *= 0.84; }
+            c = Color.FromArgb(Math.Min(255, (int)r), Math.Min(255, (int)g), Math.Min(255, (int)b));
+        }
+        if (damaged) {
+            if (x >= 5 && x <= 10 && z >= 9 && z <= 15) {
+                bool spark = (x == 8 && z == 12) || (x == 6 && z == 11);
+                return spark ? Color.FromArgb(165, 255, 60) : Color.FromArgb(28, 20, 38);
+            }
+            if (x + z == 19 || x - z == -5 || (x >= 4 && x <= 11 && z >= 8 && z <= 16 && ((x + z) & 1) == 0)) {
+                return Color.FromArgb(48, 34, 66);
+            }
+        }
+        return c;
+    }
+
+    static Color UfoDeckPixel(int x, int y) {
+        int u = (x - 16) + (y - 8) * 2 + 64;
+        int v = (x - 16) - (y - 8) * 2 + 64;
+        int mu = u % 12, mv = v % 12;
+        if (mu == 0 || mv == 0) {
+            // Recessed glowing cyan alien power conduit grid!
+            bool pulse = ((u + v) % 24 == 0);
+            return pulse ? Color.FromArgb(72, 236, 248) : Color.FromArgb(28, 124, 148);
+        }
+        if (mu == 1 || mv == 1) {
+            return Color.FromArgb(118, 102, 158); // Beveled alloy plate highlight
+        }
+        int n = ((x * 19 + y * 31) >> 1) & 3;
+        return Color.FromArgb(62 + n * 4, 46 + n * 3, 94 + n * 5);
+    }
+
+    static Color UfoRoofPixel(int x, int y, double rCorner, bool isCorner) {
+        if (isCorner && rCorner > 15.25) return Trans;
+        if (isCorner && rCorner >= 12.8) {
+            // Continuous rounded saucer upper rim + glowing cyan trim line!
+            if (rCorner >= 14.3) return Color.FromArgb(196, 210, 240);
+            if (rCorner >= 13.4) return Color.FromArgb(72, 242, 250);
+            return Color.FromArgb(96, 78, 138);
+        }
+        int u = (x - 16) + (y - 8) * 2 + 64;
+        int v = (x - 16) - (y - 8) * 2 + 64;
+        bool seam = (u % 16 == 0) || (v % 16 == 0);
+        bool node = (u % 16 == 8) && (v % 16 == 8);
+        if (node) return Color.FromArgb(88, 248, 252);
+        if (seam) return Color.FromArgb(98, 86, 138);
+        int dist = Math.Abs(x - 16) + Math.Abs(y - 8) * 2;
+        int lift = Math.Max(0, 12 - dist) * 2;
+        return Color.FromArgb(146 + lift, 142 + lift, 194 + lift);
+    }
+
     static void GenFloors(string path) {
-        // 10 floor tiles x 32x16 = 320x16
-        using (Bitmap bmp = new Bitmap(320, 16)) {
+        // 16 floor tiles x 32x16 = 512x16 (includes UFO interior deck & rounded saucer dome roof caps!)
+        using (Bitmap bmp = new Bitmap(16 * 32, 16)) {
             using (Graphics g = Graphics.FromImage(bmp)) g.Clear(Trans);
             Random rng = new Random(1994);
 
-            for (int f = 1; f < 10; f++) {
+            for (int f = 1; f < 16; f++) {
                 int ox = f * 32;
                 for (int y = 0; y < 16; y++) {
                     for (int x = 0; x < 32; x++) {
@@ -169,8 +255,28 @@ public class DuffArtGen {
                                 c = Color.FromArgb(sv + 6, sv, sv - 2);
                                 if (dist < 10 && n == 3) c = Color.FromArgb(140, 245, 45); // Glowing green Elerium!
                                 break;
+
+                            case 10: // FLOOR_UFO_DECK: Interlocking alien violet-alloy deck w/ cyan conduits
+                                c = UfoDeckPixel(x, y);
+                                break;
+
+                            case 11: // FLOOR_UFO_ROOF: Domed alien saucer upper hull plating
+                                c = UfoRoofPixel(x, y, 0.0, false);
+                                break;
+
+                            case 12: // FLOOR_UFO_ROOF_N: Rounded saucer roof North corner cap
+                            case 13: // FLOOR_UFO_ROOF_E: Rounded saucer roof East corner cap
+                            case 14: // FLOOR_UFO_ROOF_S: Rounded saucer roof South corner cap
+                            case 15: // FLOOR_UFO_ROOF_W: Rounded saucer roof West corner cap
+                                double uf = (x + 2.0 * y - 15.0) * 0.5;
+                                double vf = (2.0 * y - x + 16.0) * 0.5;
+                                double pu = (f == 12 || f == 15) ? 15.0 : 0.0;
+                                double pv = (f == 12 || f == 13) ? 15.0 : 0.0;
+                                double rc = Math.Sqrt((uf - pu) * (uf - pu) + (vf - pv) * (vf - pv));
+                                c = UfoRoofPixel(x, y, rc, true);
+                                break;
                         }
-                        PSet(bmp, ox + x, y, c);
+                        if (c != Trans) PSet(bmp, ox + x, y, c);
                     }
                 }
             }
@@ -179,18 +285,19 @@ public class DuffArtGen {
     }
 
     static void GenWalls(string westPath, string northPath) {
-        // 17 wall types x 16x32 = 272x32 (includes broken-window & battle-damaged material states!)
-        using (Bitmap bmpW = new Bitmap(272, 32))
-        using (Bitmap bmpN = new Bitmap(272, 32)) {
+        // 21 wall types x 16x32 = 336x32 (includes UFO convex saucer hull & alien oval airlocks!)
+        using (Bitmap bmpW = new Bitmap(21 * 16, 32))
+        using (Bitmap bmpN = new Bitmap(21 * 16, 32)) {
             using (Graphics g = Graphics.FromImage(bmpW)) g.Clear(Trans);
             using (Graphics g = Graphics.FromImage(bmpN)) g.Clear(Trans);
 
-            for (int w = 1; w < 17; w++) {
+            for (int w = 1; w < 21; w++) {
                 int ox = w * 16;
                 for (int x = 0; x < 16; x++) {
                     int topW = (15 - x) / 2;
                     int topN = x / 2;
                     bool isFence = (w == 9 || w == 16);
+                    bool isUfo   = (w >= 17 && w <= 20);
                     int wallH = isFence ? 13 : 24;
                     int yStart = isFence ? (24 - 13) : 0;
 
@@ -316,13 +423,13 @@ public class DuffArtGen {
                                 }
                                 break;
 
-                            case 6:  // WALL_STEEL: Beveled Alien / Industrial Bulkhead with Elerium Conduit
+                            case 6:  // WALL_STEEL: Beveled Industrial Bulkhead with Hazard Conduit
                             case 15: // WALL_STEEL_DMG: Scorched Bulkhead with Ruptured Sparking Conduit
                                 if (x == 0 || x == 15 || y == 2 || y == wallH - 2) {
                                     cw = Color.FromArgb(72, 82, 96);
                                     cn = Color.FromArgb(52, 60, 72);
                                 } else if (y == 11 || y == 12) {
-                                    cw = Color.FromArgb(135, 245, 50); // Glowing green alien power conduit!
+                                    cw = Color.FromArgb(135, 245, 50); // Glowing green conduit
                                     cn = Color.FromArgb(105, 205, 38);
                                 } else {
                                     int mv = 126 + ((x & 3) * 8);
@@ -378,15 +485,65 @@ public class DuffArtGen {
                                     cw = Trans; cn = Trans;
                                 }
                                 break;
+
+                            case 17: // WALL_UFO_HULL: Rounded convex alien saucer hull!
+                            case 18: // WALL_UFO_HULL_DMG: Battle-damaged alien saucer hull!
+                                int z = 23 - y;
+                                // Parabolic C-curve rib offset so flat segments look curved in 3D!
+                                int cBowW = ((z - 12) * (z - 12)) / 36;
+                                int cBowN = -cBowW;
+                                int ribW = (x + cBowW + 16) % 8;
+                                int ribN = (x + cBowN + 16) % 8;
+                                cw = UfoHullShade(z, 1.0,  ribW, w == 18, x, y);
+                                cn = UfoHullShade(z, 0.35, ribN, w == 18, x, y);
+                                break;
+
+                            case 19: // WALL_UFO_DOOR_CLOSED: Rounded oval alien iris containment airlock!
+                            case 20: // WALL_UFO_DOOR_OPEN:   Open oval alien containment archway!
+                                int zd = 23 - y;
+                                // Elliptical portal equation centered at (7.5, 12.5), radii rx=5.2, ry=9.2
+                                double dxp = (x - 7.5) / 5.2;
+                                double dyp = (y - 12.5) / 9.2;
+                                double ell = dxp * dxp + dyp * dyp;
+                                if (ell > 1.0) {
+                                    // Outer convex saucer hull surrounding the oval airlock
+                                    cw = UfoHullShade(zd, 1.0,  (x + 2) % 8, false, x, y);
+                                    cn = UfoHullShade(zd, 0.35, (x + 2) % 8, false, x, y);
+                                } else if (ell >= 0.74) {
+                                    // Glowing cyan/silver rounded oval containment ring!
+                                    bool innerGlow = (ell < 0.86);
+                                    cw = innerGlow ? Color.FromArgb(80, 248, 255) : Color.FromArgb(172, 184, 224);
+                                    cn = innerGlow ? Color.FromArgb(52, 204, 224) : Color.FromArgb(128, 138, 182);
+                                } else if (w == 20) {
+                                    // Retracted iris: open curved alien portal!
+                                    cw = Trans; cn = Trans;
+                                } else {
+                                    // Closed iris: curved interlocking violet-alloy blades + glowing core glyph!
+                                    double core = dxp * dxp + dyp * dyp;
+                                    if (core <= 0.10) {
+                                        cw = Color.FromArgb(168, 255, 64); // Elerium iris lock glyph!
+                                        cn = Color.FromArgb(136, 224, 48);
+                                    } else if (core <= 0.22) {
+                                        cw = Color.FromArgb(72, 244, 252);
+                                        cn = Color.FromArgb(48, 198, 218);
+                                    } else {
+                                        bool seam = (Math.Abs(x - 7.5) < 0.6) || (Math.Abs((x - 7) + (y - 12) / 2) == 0);
+                                        cw = seam ? Color.FromArgb(44, 30, 74) : Color.FromArgb(118, 86, 168);
+                                        cn = seam ? Color.FromArgb(30, 20, 54) : Color.FromArgb(88, 62, 134);
+                                    }
+                                }
+                                break;
                         }
 
                         // 3D sunlit wall cap at y==0 and dark ambient occlusion baseboard at y==wallH-1
-                        if (y == 0 && cw != Trans) {
-                            cw = Color.FromArgb(225, 225, 230);
-                            cn = Color.FromArgb(185, 185, 192);
-                        } else if (y == wallH - 1 && cw != Trans && !isFence) {
-                            cw = Color.FromArgb(32, 32, 38);
-                            cn = Color.FromArgb(22, 22, 28);
+                        if (!isUfo) {
+                            if (y == 0 && cw != Trans) {
+                                cw = Color.FromArgb(225, 225, 230);
+                                cn = Color.FromArgb(185, 185, 192);
+                            } else if (y == wallH - 1 && cw != Trans && !isFence) {
+                                cw = Color.FromArgb(32, 32, 38);
+                                cn = Color.FromArgb(22, 22, 28);
+                            }
                         }
 
                         if (cw != Trans) PSet(bmpW, ox + x, wyW, cw);
@@ -399,9 +556,525 @@ public class DuffArtGen {
         }
     }
 
-    static void GenObjects(string path) {
-        // 14 objects x 32x40 = 448x40
-        using (Bitmap bmp = new Bitmap(448, 40)) {
+    // Material IDs for 2-Tile 3D Isometric Vehicles:
+    // 1=Primary Body, 2=Secondary Accent, 3=Glass, 4=Tire, 5=Chrome/Silver,
+    // 6=Headlight, 7=Red Light, 8=Blue Light, 9=Dark Trim/Grille, 10=Gold/Amber
+    static byte[,,] BuildVehicleVoxels(int vehKind) {
+        byte[,,] m = new byte[32, 16, 20];
+
+        if (vehKind == 0 || vehKind == 1) {
+            // 0 = Coopersburg Police Cruiser, 1 = 90s Civilian Sedan
+            bool isPolice = (vehKind == 0);
+
+            // Lower body shell (u = 2..29, v = 3..12) with sloped front hood & tapered trunk
+            for (int u = 2; u <= 29; u++) {
+                int topZ = (u == 2) ? 6 : (u <= 26) ? 7 : (u <= 28) ? 6 : 5;
+                for (int v = 3; v <= 12; v++) {
+                    for (int z = 2; z <= topZ; z++) {
+                        bool doorZone = (u >= 11 && u <= 18);
+                        m[u, v, z] = (isPolice && doorZone) ? (byte)2 : (byte)1;
+                    }
+                }
+            }
+
+            // Side rub-strip & door badge
+            for (int u = 4; u <= 27; u++) {
+                if (!isPolice && zCheck(3)) {
+                    m[u, 3, 3] = 9;
+                    m[u, 12, 3] = 9;
+                }
+            }
+            if (isPolice) {
+                m[14, 3, 5] = 10; m[15, 3, 5] = 10;
+                m[14, 12, 5] = 10; m[15, 12, 5] = 10;
+            }
+
+            // Chrome front & rear bumpers + dark radiator grille + headlights & taillights
+            for (int v = 3; v <= 12; v++) {
+                m[2,  v, 2] = 5;
+                m[29, v, 2] = 5;
+                if (v >= 6 && v <= 9) {
+                    m[29, v, 3] = 9;
+                    m[29, v, 4] = 9;
+                }
+            }
+            // Twin Headlights (front u=29) & Taillights (rear u=2)
+            for (int v = 4; v <= 5; v++) {
+                m[29, v, 4] = 6; m[29, 15 - v, 4] = 6;
+                m[2,  v, 4] = 7; m[2,  15 - v, 4] = 7;
+            }
+            m[29, 3, 4] = 10; m[29, 12, 4] = 10; // Corner amber turn markers
+
+            // Sloped Cabin, Panoramic Windshield, Side Windows & B-Pillar (u = 8..20, v = 4..11)
+            for (int u = 8; u <= 20; u++) {
+                int maxZ = (u == 8) ? 9 : (u == 9) ? 11 :
+                           (u <= 17) ? 12 : (u == 18) ? 11 : (u == 19) ? 10 : 8;
+                for (int v = 4; v <= 11; v++) {
+                    for (int z = 8; z <= maxZ; z++) {
+                        bool roofCap = (z == 12 && u >= 10 && u <= 17);
+                        bool frontShield = (u >= 18 && v >= 5 && v <= 10);
+                        bool rearGlass   = (u <= 9  && v >= 5 && v <= 10);
+                        bool sideGlass   = ((v == 4 || v == 11) && u >= 10 && u <= 17 && u != 14 && z <= 11);
+                        if (roofCap) {
+                            m[u, v, z] = isPolice ? (byte)2 : (byte)1;
+                        } else if (frontShield || rearGlass || sideGlass) {
+                            m[u, v, z] = 3;
+                        } else {
+                            m[u, v, z] = isPolice ? (byte)2 : (byte)1;
+                        }
+                    }
+                }
+            }
+
+            // Sedan tinted sunroof vs Police Cruiser Red/White/Blue Roof Lightbar!
+            if (isPolice) {
+                for (int u = 13; u <= 15; u++) {
+                    for (int v = 4; v <= 11; v++) {
+                        m[u, v, 13] = (v <= 6) ? (byte)7 : (v <= 8) ? (byte)5 : (byte)8;
+                    }
+                }
+            } else {
+                for (int u = 13; u <= 16; u++)
+                    for (int v = 6; v <= 9; v++)
+                        m[u, v, 12] = 9;
+            }
+
+            // Carve dark wheel arches & mount 4 rounded tires with silver hubcaps
+            int[] axles = new int[] { 5, 21 };
+            foreach (int au in axles) {
+                for (int u = au; u <= au + 5; u++) {
+                    for (int z = 2; z <= 5; z++) {
+                        m[u, 3, z] = 9;
+                        m[u, 12, z] = 9;
+                    }
+                }
+                for (int u = au + 1; u <= au + 4; u++) {
+                    for (int z = 0; z <= 4; z++) {
+                        bool corner = ((u == au + 1 || u == au + 4) && (z == 0 || z == 4));
+                        if (corner) continue;
+                        bool hub = (u >= au + 2 && u <= au + 3 && z >= 1 && z <= 2);
+                        byte wmat = hub ? (byte)5 : (byte)4;
+                        m[u, 2, z] = wmat; m[u, 3, z] = wmat;
+                        m[u, 13, z] = wmat; m[u, 12, z] = wmat;
+                    }
+                }
+            }
+        } else if (vehKind == 2) {
+            // 2 = Heavy Utility / Farm Pickup Truck (with open hollow 3D cargo bed!)
+            // Rear Open Cargo Bed (u = 2..13, v = 3..12, z = 2..8)
+            for (int u = 2; u <= 13; u++) {
+                for (int v = 3; v <= 12; v++) {
+                    for (int z = 2; z <= 8; z++) {
+                        bool bedWall = (u == 2 || v == 3 || v == 12);
+                        if (z <= 4) {
+                            m[u, v, z] = bedWall ? (byte)1 : (byte)9; // Dark recessed bed liner floor
+                        } else if (bedWall) {
+                            m[u, v, z] = 1;
+                        }
+                    }
+                }
+            }
+            // Black steel rollbar / headache rack behind cab (u = 13)
+            for (int v = 3; v <= 12; v++) {
+                for (int z = 9; z <= 12; z++) {
+                    if (v <= 4 || v >= 11 || z == 12) m[13, v, z] = 9;
+                }
+            }
+            // High Truck Cab (u = 14..20, v = 3..12, z = 2..13) + Sloped Windshield (u = 21)
+            for (int u = 14; u <= 21; u++) {
+                int maxZ = (u == 21) ? 10 : 13;
+                for (int v = 3; v <= 12; v++) {
+                    for (int z = 2; z <= maxZ; z++) {
+                        if (z <= 8) {
+                            m[u, v, z] = 1;
+                        } else if (v >= 4 && v <= 11) {
+                            bool roof = (z == 13 && u <= 19);
+                            bool wshield = (u >= 20 && v >= 5 && v <= 10);
+                            bool sideWin = ((v == 4 || v == 11) && u >= 15 && u <= 19 && z <= 12);
+                            m[u, v, z] = roof ? (byte)1 : (wshield || sideWin) ? (byte)3 : (byte)1;
+                        }
+                    }
+                }
+            }
+            // Squared-off Pickup Engine Hood (u = 21..29, v = 3..12, z = 2..8)
+            for (int u = 21; u <= 29; u++) {
+                int topZ = (u >= 28) ? 7 : 8;
+                for (int v = 3; v <= 12; v++) {
+                    for (int z = 2; z <= topZ; z++) {
+                        if (m[u, v, z] == 0) m[u, v, z] = 1;
+                    }
+                }
+            }
+            // Bold Chrome Bumpers, Grille, Headlights & Taillights
+            for (int v = 3; v <= 12; v++) {
+                m[2,  v, 2] = 5;
+                m[29, v, 2] = 5;
+                if (v >= 5 && v <= 10) {
+                    m[29, v, 4] = 5;
+                    m[29, v, 5] = 9;
+                    m[29, v, 6] = 5;
+                }
+            }
+            for (int v = 3; v <= 4; v++) {
+                m[29, v, 5] = 6; m[29, 15 - v, 5] = 6;
+                m[2,  v, 5] = 7; m[2,  15 - v, 5] = 7;
+                m[2,  v, 6] = 7; m[2,  15 - v, 6] = 7;
+            }
+
+            // Tall 4x4 Work Tires & Wheel Wells
+            int[] axles = new int[] { 5, 21 };
+            foreach (int au in axles) {
+                for (int u = au; u <= au + 5; u++) {
+                    for (int z = 2; z <= 5; z++) {
+                        m[u, 3, z] = 9;
+                        m[u, 12, z] = 9;
+                    }
+                }
+                for (int u = au + 1; u <= au + 4; u++) {
+                    for (int z = 0; z <= 5; z++) {
+                        bool corner = ((u == au + 1 || u == au + 4) && (z == 0 || z == 5));
+                        if (corner) continue;
+                        bool hub = (u >= au + 2 && u <= au + 3 && z >= 2 && z <= 3);
+                        byte wmat = hub ? (byte)5 : (byte)4;
+                        m[u, 2, z] = wmat; m[u, 3, z] = wmat;
+                        m[u, 13, z] = wmat; m[u, 12, z] = wmat;
+                    }
+                }
+            }
+        } else {
+            // 3 = Full 2-Tile Pennsylvania Farm Tractor (Green & Yellow!)
+            // Rear Axle Chassis, Hitch & Operator Platform (u = 4..13, v = 4..11, z = 4..8)
+            for (int v = 6; v <= 9; v++) { m[2, v, 4] = 9; m[3, v, 4] = 9; } // Drawbar hitch
+            for (int u = 4; u <= 13; u++) {
+                for (int v = 4; v <= 11; v++) {
+                    for (int z = 4; z <= 8; z++) m[u, v, z] = 1;
+                }
+            }
+            // Flared Green Rear Fenders curving over the giant rear wheels
+            for (int u = 4; u <= 12; u++) {
+                for (int v = 2; v <= 4; v++) { m[u, v, 9] = 1; m[u, 15 - v, 9] = 1; }
+                if (u >= 5 && u <= 11) {
+                    for (int v = 2; v <= 4; v++) { m[u, v, 10] = 1; m[u, 15 - v, 10] = 1; }
+                }
+            }
+            // Operator Seat, Steering Column, Yellow ROPS Cab Frame & Green Canopy Roof
+            for (int u = 6; u <= 9; u++)
+                for (int v = 6; v <= 9; v++)
+                    for (int z = 9; z <= (u <= 7 ? 12 : 10); z++) m[u, v, z] = 9;
+            for (int z = 9; z <= 12; z++) { m[11, 7, z] = 9; m[11, 8, z] = 9; }
+            for (int z = 9; z <= 15; z++) {
+                m[5,  4, z] = 2; m[5,  11, z] = 2;
+                m[12, 4, z] = 2; m[12, 11, z] = 2;
+            }
+            for (int u = 5; u <= 12; u++)
+                for (int v = 4; v <= 11; v++)
+                    m[u, v, 16] = 1; // Green canopy roof
+
+            // Long Narrow Green Engine Hood (u = 13..28, v = 5..10, z = 5..11) + Yellow Stripe!
+            for (int u = 13; u <= 28; u++) {
+                int topZ = (u == 28) ? 10 : 11;
+                for (int v = 5; v <= 10; v++) {
+                    for (int z = 5; z <= topZ; z++) {
+                        bool stripe = (z == 9 && (v == 5 || v == 10) && u >= 14 && u <= 27);
+                        bool louver = (z >= 7 && z <= 8 && (v == 5 || v == 10) && (u == 18 || u == 20 || u == 22 || u == 24));
+                        m[u, v, z] = stripe ? (byte)2 : louver ? (byte)9 : (byte)1;
+                    }
+                }
+            }
+            // Front Tractor Grille & Twin Work Headlights (u = 28)
+            for (int v = 6; v <= 9; v++)
+                for (int z = 6; z <= 9; z++) m[28, v, z] = 9;
+            m[28, 5, 9] = 6; m[28, 10, 9] = 6;
+            m[28, 5, 10] = 6; m[28, 10, 10] = 6;
+
+            // Tall Vertical Black Exhaust Stack + Muffler above Hood!
+            for (int z = 11; z <= 17; z++) {
+                m[22, 6, z] = 9;
+                if (z >= 13 && z <= 15) m[23, 6, z] = 9;
+            }
+
+            // Front Axle Beam (u = 25..26, v = 3..12, z = 2..3)
+            for (int u = 25; u <= 26; u++)
+                for (int v = 4; v <= 11; v++)
+                    m[u, v, 3] = 9;
+
+            // MASSIVE Treaded Rear Tractor Wheels (u = 3..11, z = 0..8) with Bright Yellow Hubs!
+            for (int u = 3; u <= 11; u++) {
+                for (int z = 0; z <= 8; z++) {
+                    int du = u - 7, dz = z - 4;
+                    int d2 = du * du + dz * dz;
+                    if (d2 > 20) continue;
+                    bool hub = (d2 <= 5);
+                    byte wmat = hub ? (byte)2 : (byte)4;
+                    for (int v = 2; v <= 3; v++) {
+                        m[u, v, z] = wmat;
+                        m[u, 15 - v, z] = wmat;
+                    }
+                }
+            }
+            // Smaller Front Steerable Tractor Wheels (u = 23..28, z = 0..5) with Yellow Hubs!
+            for (int u = 23; u <= 28; u++) {
+                for (int z = 0; z <= 5; z++) {
+                    int du2 = u * 2 - 51, dz2 = z * 2 - 5;
+                    int d2 = du2 * du2 + dz2 * dz2;
+                    if (d2 > 34) continue;
+                    bool hub = (d2 <= 8);
+                    byte wmat = hub ? (byte)2 : (byte)4;
+                    for (int v = 3; v <= 4; v++) {
+                        m[u, v, z] = wmat;
+                        m[u, 15 - v, z] = wmat;
+                    }
+                }
+            }
+        }
+
+        return m;
+    }
+
+    static bool zCheck(int z) { return z >= 0; }
+
+    static Color ShadeVehicleMat(int vehKind, byte mat, int tone) {
+        // tone: 0 = Bright Top, 1 = Sunlit Left Face, 2 = Shaded Right Face
+        switch (mat) {
+            case 1: // Primary Body
+                if (vehKind == 0) { // Police Cruiser Deep DUFF-COM Navy
+                    return tone == 0 ? Color.FromArgb(64, 108, 184) :
+                           tone == 1 ? Color.FromArgb(48, 84, 148)  : Color.FromArgb(34, 60, 112);
+                } else if (vehKind == 1) { // Civilian Sedan Metallic Crimson/Burgundy
+                    return tone == 0 ? Color.FromArgb(208, 52, 48)  :
+                           tone == 1 ? Color.FromArgb(168, 36, 34)  : Color.FromArgb(124, 24, 24);
+                } else if (vehKind == 2) { // Pickup Truck Rugged Ochre/Tan-Bronze
+                    return tone == 0 ? Color.FromArgb(206, 158, 96) :
+                           tone == 1 ? Color.FromArgb(172, 126, 70) : Color.FromArgb(132, 92, 48);
+                } else { // PA Farm Tractor Classic John-Deere Green
+                    return tone == 0 ? Color.FromArgb(78, 192, 54)  :
+                           tone == 1 ? Color.FromArgb(56, 154, 40)  : Color.FromArgb(38, 118, 28);
+                }
+            case 2: // Secondary Accent (Police White Doors/Roof OR Tractor Yellow!)
+                if (vehKind == 0) {
+                    return tone == 0 ? Color.FromArgb(244, 246, 252) :
+                           tone == 1 ? Color.FromArgb(214, 220, 232) : Color.FromArgb(174, 182, 198);
+                } else {
+                    return tone == 0 ? Color.FromArgb(252, 224, 48)  :
+                           tone == 1 ? Color.FromArgb(228, 192, 34)  : Color.FromArgb(186, 152, 24);
+                }
+            case 3: // Tinted Cabin Glass
+                return tone == 0 ? Color.FromArgb(145, 238, 252) :
+                       tone == 1 ? Color.FromArgb(76, 188, 224)  : Color.FromArgb(46, 134, 172);
+            case 4: // Rubber Tire
+                return tone == 0 ? Color.FromArgb(54, 58, 66)    :
+                       tone == 1 ? Color.FromArgb(38, 42, 48)    : Color.FromArgb(26, 28, 34);
+            case 5: // Chrome / Silver Hubcap
+                return tone == 0 ? Color.FromArgb(236, 240, 246) :
+                       tone == 1 ? Color.FromArgb(186, 194, 206) : Color.FromArgb(138, 146, 160);
+            case 6: // Glowing Warm Headlight
+                return Color.FromArgb(255, 244, 135);
+            case 7: // Glowing Red Strobe / Taillight
+                return tone == 2 ? Color.FromArgb(205, 32, 32) : Color.FromArgb(252, 48, 44);
+            case 8: // Glowing Electric Blue Strobe
+                return tone == 2 ? Color.FromArgb(42, 108, 225) : Color.FromArgb(65, 148, 255);
+            case 9: // Dark Grille / Bed Liner / Exhaust / Seat
+                return tone == 0 ? Color.FromArgb(74, 78, 88)    :
+                       tone == 1 ? Color.FromArgb(52, 56, 64)    : Color.FromArgb(36, 38, 46);
+            case 10: // Gold Star / Amber Signal
+                return Color.FromArgb(250, 205, 42);
+            default:
+                return Color.Gray;
+        }
+    }
+
+    static bool ValidVehicleCanvasPt(int cx, int cy, bool alongY) {
+        if (cx < 0 || cx >= 48 || cy < 0 || cy >= 48) return false;
+        if (!alongY) {
+            return (cx <= 31 && cy <= 39) || (cx >= 16 && cy >= 8);
+        } else {
+            return (cx >= 16 && cy <= 39) || (cx <= 31 && cy >= 8);
+        }
+    }
+
+    static void RenderTwoTileVehicle(Bitmap sheet, int backSlot, int frontSlot, int vehKind, bool alongY) {
+        byte[,,] m = BuildVehicleVoxels(vehKind);
+        Color[,] canv = new Color[48, 48];
+        bool[,] filled = new bool[48, 48];
+        bool[,] isShadow = new bool[48, 48];
+
+        // 1. Soft dark ground contact shadow beneath chassis footprint
+        for (int u = 3; u <= 28; u++) {
+            for (int v = 3; v <= 12; v++) {
+                int cx = !alongY ? (16 + u - v) : (31 - u + v);
+                int cy = 24 + ((u + v) >> 1);
+                if (ValidVehicleCanvasPt(cx, cy, alongY)) {
+                    canv[cx, cy] = Color.FromArgb(20, 22, 28);
+                    filled[cx, cy] = true;
+                    isShadow[cx, cy] = true;
+                }
+            }
+        }
+
+        // 2. Strict Back-to-Front 3D Voxel Projection (s = u + v from 0..46, z from 0..19)
+        for (int s = 0; s <= 46; s++) {
+            int uMin = Math.Max(0, s - 15);
+            int uMax = Math.Min(31, s);
+            for (int u = uMin; u <= uMax; u++) {
+                int v = s - u;
+                for (int z = 0; z < 20; z++) {
+                    byte mat = m[u, v, z];
+                    if (mat == 0) continue;
+
+                    bool topOpen = (z + 1 >= 20 || m[u, v, z + 1] == 0);
+                    bool vOpen   = (v + 1 >= 16 || m[u, v + 1, z] == 0);
+                    bool uOpen   = (u + 1 >= 32 || m[u + 1, v, z] == 0);
+                    if (!topOpen && !vOpen && !uOpen) continue;
+
+                    bool leftOpen  = !alongY ? vOpen : uOpen;
+                    bool rightOpen = !alongY ? uOpen : vOpen;
+
+                    int tone = 1;
+                    if (topOpen) {
+                        tone = 0;
+                    } else if (leftOpen && !rightOpen) {
+                        tone = 1;
+                    } else if (rightOpen && !leftOpen) {
+                        tone = 2;
+                    } else {
+                        tone = 1;
+                    }
+
+                    Color col = ShadeVehicleMat(vehKind, mat, tone);
+                    // Add specular diagonal glint on glass windshields!
+                    if (mat == 3 && ((u + v + z) % 5 == 0)) {
+                        col = Color.FromArgb(215, 250, 255);
+                    }
+
+                    int cx = !alongY ? (16 + u - v) : (31 - u + v);
+                    int cy = 24 + ((u + v) >> 1) - z;
+                    if (ValidVehicleCanvasPt(cx, cy, alongY)) {
+                        canv[cx, cy] = col;
+                        filled[cx, cy] = true;
+                        isShadow[cx, cy] = false;
+                    }
+                }
+            }
+        }
+
+        // 3. Crisp 1px dark silhouette outline matching DUFF-COM isometric object style
+        bool[,] addOutline = new bool[48, 48];
+        int[] odx = new int[] { -1, 1, 0, 0 };
+        int[] ody = new int[] { 0, 0, -1, 1 };
+        for (int cy = 0; cy < 48; cy++) {
+            for (int cx = 0; cx < 48; cx++) {
+                if (filled[cx, cy] || !ValidVehicleCanvasPt(cx, cy, alongY)) continue;
+                for (int d = 0; d < 4; d++) {
+                    int nx = cx + odx[d], ny = cy + ody[d];
+                    if (nx >= 0 && nx < 48 && ny >= 0 && ny < 48 && filled[nx, ny] && !isShadow[nx, ny]) {
+                        addOutline[cx, cy] = true;
+                        break;
+                    }
+                }
+            }
+        }
+        for (int cy = 0; cy < 48; cy++) {
+            for (int cx = 0; cx < 48; cx++) {
+                if (addOutline[cx, cy]) {
+                    canv[cx, cy] = Color.FromArgb(18, 20, 24);
+                    filled[cx, cy] = true;
+                }
+            }
+        }
+
+        // 4. Disjointly slice the 48x48 vehicle across Back Tile (32x40) & Front Tile (32x40)
+        for (int cy = 0; cy < 48; cy++) {
+            for (int cx = 0; cx < 48; cx++) {
+                if (!filled[cx, cy]) continue;
+                if (!alongY) {
+                    bool toBack = (cx < 16) || (cy < 8) || (cx < 24 && cy <= 39);
+                    if (toBack) {
+                        PSet(sheet, backSlot * 32 + cx, cy, canv[cx, cy]);
+                    } else {
+                        PSet(sheet, frontSlot * 32 + (cx - 16), cy - 8, canv[cx, cy]);
+                    }
+                } else {
+                    bool toBack = (cx >= 32) || (cy < 8) || (cx >= 24 && cy <= 39);
+                    if (toBack) {
+                        PSet(sheet, backSlot * 32 + (cx - 16), cy, canv[cx, cy]);
+                    } else {
+                        PSet(sheet, frontSlot * 32 + cx, cy - 8, canv[cx, cy]);
+                    }
+                }
+            }
+        }
+    }
+
+    static void RenderUfoCorner(Bitmap sheet, int slot, int cornerDir) {
+        // cornerDir: 0 = North (x0,y0), 1 = East (x1,y0), 2 = South (x1,y1), 3 = West (x0,y1)
+        int ox = slot * 32;
+        double pu = (cornerDir == 0 || cornerDir == 3) ? 15.0 : 0.0;
+        double pv = (cornerDir == 0 || cornerDir == 1) ? 15.0 : 0.0;
+
+        // 1. Paint interior alien alloy deck plating inside the rounded corner arc (exterior stays Trans!)
+        for (int fy = 0; fy < 16; fy++) {
+            for (int fx = 0; fx < 32; fx++) {
+                if (!InDiamond(fx, fy)) continue;
+                double uf = (fx + 2.0 * fy - 15.0) * 0.5;
+                double vf = (2.0 * fy - fx + 16.0) * 0.5;
+                double rc = Math.Sqrt((uf - pu) * (uf - pu) + (vf - pv) * (vf - pv));
+                if (rc <= 14.2) {
+                    PSet(sheet, ox + fx, 24 + fy, UfoDeckPixel(fx, fy));
+                }
+            }
+        }
+
+        // 2. Render 2x-oversampled 3D quarter-circle convex saucer hull shell (su, sv in 0..31, z in 0..23)
+        for (int s = 0; s <= 62; s++) {
+            int suMin = Math.Max(0, s - 31);
+            int suMax = Math.Min(31, s);
+            for (int su = suMin; su <= suMax; su++) {
+                int sv = s - su;
+                double u = su * 0.48387; // 0.0 .. 15.0
+                double v = sv * 0.48387; // 0.0 .. 15.0
+                double du = Math.Abs(u - pu);
+                double dv = Math.Abs(v - pv);
+                double r  = Math.Sqrt(du * du + dv * dv);
+                if (r < 11.4 || r > 15.35) continue;
+
+                double theta = Math.Atan2(dv, du) / (Math.PI * 0.5); // 0.0 at |dv|=0 (West seam), 1.0 at |du|=0 (North seam)
+                double light = 1.0 - 0.65 * theta;
+                if (cornerDir == 2) {
+                    // Add specular nose highlight on front-facing South saucer curve
+                    double apex = 1.0 - Math.Abs(theta - 0.5) * 2.0;
+                    light = Math.Min(1.08, light + 0.16 * apex);
+                }
+
+                int arcIdx = (int)Math.Round(theta * 16.0);
+                int cx = (31 + su - sv) >> 1;
+
+                for (int z = 0; z < 24; z++) {
+                    int cy = 23 + ((su + sv) >> 2) - z;
+                    if (cx < 0 || cx >= 32 || cy < 0 || cy >= 40) continue;
+
+                    Color col;
+                    if (z == 23) {
+                        // Top curved saucer bevel + cyan rim accent matching FLOOR_UFO_ROOF_*
+                        if (r >= 14.2)      col = Color.FromArgb(198, 212, 244);
+                        else if (r >= 13.1) col = Color.FromArgb(76, 244, 252);
+                        else                col = Color.FromArgb(124, 110, 172);
+                    } else if (r < 12.3 && cornerDir == 0) {
+                        // Interior concave bulkhead wall visible when UFO roof is cut away
+                        int cBow = ((z - 12) * (z - 12)) / 36;
+                        col = UfoHullShade(z, 0.55, (arcIdx + cBow + 16) % 8, false, arcIdx, 23 - z);
+                    } else {
+                        int cBow = ((z - 12) * (z - 12)) / 36;
+                        col = UfoHullShade(z, light, (arcIdx + cBow + 16) % 8, false, arcIdx, 23 - z);
+                    }
+                    PSet(sheet, ox + cx, cy, col);
+                }
+            }
+        }
+    }
+
+    public static void GenObjects(string path) {
+        // 37 objects x 32x40 = 1184x40 (includes 2-tile vehicles, 4 curved UFO hull corners & 5 UFO stations!)
+        using (Bitmap bmp = new Bitmap(37 * 32, 40)) {
             using (Graphics g = Graphics.FromImage(bmp)) g.Clear(Trans);
 
             // 1. OBJ_ARCADE_CAB (ox = 32): True 3D Isometric 90s Arcade Cabinet!
@@ -493,52 +1166,50 @@ public class DuffArtGen {
                 }
             }
 
-            // 6. OBJ_CAR_HOOD (ox = 192): True 3D Isometric Coopersburg Police Cruiser!
-            {
-                int ox = 6 * 32;
-                // Lower cruiser chassis (blue & white doors)
-                DrawIsoBox(bmp, ox, 16, 35, 11, 8, 6,
-                           Color.FromArgb(56, 98, 168), Color.FromArgb(42, 76, 138), Color.FromArgb(230, 234, 242), true);
-                // Upper cabin & windshield
-                DrawIsoBox(bmp, ox, 16, 29, 6, 5, 5,
-                           Color.FromArgb(238, 242, 248), Color.FromArgb(78, 185, 220), Color.FromArgb(58, 152, 192), true);
-                // Red & Blue Roof Lightbar!
-                PSet(bmp, ox + 14, 21, Color.FromArgb(250, 45, 45));
-                PSet(bmp, ox + 15, 21, Color.FromArgb(250, 45, 45));
-                PSet(bmp, ox + 17, 21, Color.FromArgb(55, 135, 255));
-                PSet(bmp, ox + 18, 21, Color.FromArgb(55, 135, 255));
-                // Tires & Silver Hubcaps
-                int[] wx = new int[] { 10, 21 };
-                foreach (int tx in wx) {
-                    for (int dy = 0; dy < 4; dy++)
-                        for (int dx = 0; dx < 4; dx++)
-                            PSet(bmp, ox + tx + dx, 31 + dy, (dx == 1 && dy == 1) ? Color.Silver : Color.FromArgb(22, 24, 28));
-                }
-                // Glowing Headlights
-                PSet(bmp, ox + 9,  31, Color.FromArgb(255, 240, 120));
-                PSet(bmp, ox + 13, 33, Color.FromArgb(255, 240, 120));
-            }
+            // 6 & 14..16: Full 2-Tile Coopersburg Police Cruiser (+X: 6 & 14, +Y: 15 & 16)
+            RenderTwoTileVehicle(bmp, 6,  14, 0, false);
+            RenderTwoTileVehicle(bmp, 15, 16, 0, true);
 
-            // 7. OBJ_UFO_CORE (ox = 224): 3D Alien Elerium-115 Power Reactor
+            // 7. OBJ_UFO_CORE (ox = 224): Rounded Futuristic Alien Elerium-115 Power Reactor!
             {
                 int ox = 7 * 32;
-                DrawIsoBox(bmp, ox, 16, 35, 8, 8, 5,
-                           Color.FromArgb(115, 126, 144), Color.FromArgb(84, 94, 112), Color.FromArgb(58, 66, 82), true);
-                // Glowing Plasma Containment Sphere
-                for (int y = 12; y <= 28; y++) {
-                    for (int x = 9; x <= 23; x++) {
-                        int d2 = (x - 16) * (x - 16) + (y - 20) * (y - 20);
-                        if (d2 <= 42) {
-                            Color ec = d2 < 8  ? Color.FromArgb(245, 255, 220) :
-                                       d2 < 20 ? Color.FromArgb(155, 255, 55)  :
-                                       d2 < 34 ? Color.FromArgb(85, 205, 30)   : Color.FromArgb(28, 88, 24);
+                // Rounded octagonal violet-titanium base ring + cyan magnetic conduit
+                for (int y = 26; y <= 36; y++) {
+                    for (int x = 6; x <= 25; x++) {
+                        double dx = (x - 15.5) / 9.2;
+                        double dy = (y - 31.0) / 4.8;
+                        double d2 = dx * dx + dy * dy;
+                        if (d2 <= 1.0) {
+                            Color bc = d2 > 0.78 ? Color.FromArgb(24, 18, 38) :
+                                       (y == 29 || y == 30) ? Color.FromArgb(72, 244, 252) :
+                                       (x < 16) ? Color.FromArgb(146, 118, 198) : Color.FromArgb(88, 64, 138);
+                            PSet(bmp, ox + x, y, bc);
+                        }
+                    }
+                }
+                // Blazing Elerium-115 Plasma Containment Sphere + magnetic field ribs
+                for (int y = 10; y <= 28; y++) {
+                    for (int x = 8; x <= 23; x++) {
+                        int d2 = (x - 16) * (x - 16) + (y - 19) * (y - 19);
+                        if (d2 <= 49) {
+                            bool magRing = (y == 19 && (x <= 10 || x >= 21));
+                            Color ec = magRing ? Color.FromArgb(80, 248, 255)  :
+                                       d2 < 7  ? Color.FromArgb(248, 255, 224) :
+                                       d2 < 18 ? Color.FromArgb(168, 255, 58)  :
+                                       d2 < 34 ? Color.FromArgb(92, 214, 34)   : Color.FromArgb(34, 98, 28);
                             PSet(bmp, ox + x, y, ec);
                         }
                     }
                 }
-                // Top reactor cap
-                DrawIsoBox(bmp, ox, 16, 14, 5, 5, 3,
-                           Color.FromArgb(135, 146, 164), Color.FromArgb(92, 102, 120), Color.FromArgb(68, 76, 92), true);
+                // Domed alien alloy upper containment crown + cyan apex emitter
+                for (int y = 7; y <= 13; y++) {
+                    int hw = (y <= 8) ? 3 : (y <= 10) ? 5 : 6;
+                    for (int x = 16 - hw; x <= 15 + hw; x++) {
+                        Color cc = (y == 8 && x >= 14 && x <= 17) ? Color.FromArgb(80, 248, 255) :
+                                   (x < 16) ? Color.FromArgb(182, 196, 232) : Color.FromArgb(108, 92, 158);
+                        PSet(bmp, ox + x, y, cc);
+                    }
+                }
             }
 
             // 8. OBJ_CRATE (ox = 256): 3D Isometric Military/Salvage Crate
@@ -606,29 +1277,207 @@ public class DuffArtGen {
                 }
             }
 
-            // 13. OBJ_TRACTOR (ox = 416): True 3D Isometric Green & Yellow PA Farm Tractor!
+            // 13 & 17..19: Full 2-Tile Pennsylvania Farm Tractor (+X: 13 & 17, +Y: 18 & 19)
+            RenderTwoTileVehicle(bmp, 13, 17, 3, false);
+            RenderTwoTileVehicle(bmp, 18, 19, 3, true);
+
+            // 20..23: Full 2-Tile 90s Civilian Sedan (+X: 20 & 21, +Y: 22 & 23)
+            RenderTwoTileVehicle(bmp, 20, 21, 1, false);
+            RenderTwoTileVehicle(bmp, 22, 23, 1, true);
+
+            // 24..27: Full 2-Tile Utility / Farm Pickup Truck (+X: 24 & 25, +Y: 26 & 27)
+            RenderTwoTileVehicle(bmp, 24, 25, 2, false);
+            RenderTwoTileVehicle(bmp, 26, 27, 2, true);
+
+            // 28..31: 3D Curved Alien Saucer Hull Corner Fairings (N, E, S, W)!
+            RenderUfoCorner(bmp, 28, 0); // OBJ_UFO_CORNER_N
+            RenderUfoCorner(bmp, 29, 1); // OBJ_UFO_CORNER_E
+            RenderUfoCorner(bmp, 30, 2); // OBJ_UFO_CORNER_S
+            RenderUfoCorner(bmp, 31, 3); // OBJ_UFO_CORNER_W
+
+            // 32. OBJ_UFO_NAV: Alien Navigation Console w/ Floating 3D Holographic Star-Chart!
             {
-                int ox = 13 * 32;
-                // Engine Hood & Body
-                DrawIsoBox(bmp, ox, 17, 31, 8, 6, 7,
-                           Color.FromArgb(72, 185, 52), Color.FromArgb(52, 148, 38), Color.FromArgb(38, 114, 28), true);
-                // Operator Cab / Rollbar
-                DrawIsoBox(bmp, ox, 13, 24, 4, 4, 7,
-                           Color.FromArgb(52, 148, 38), Color.FromArgb(248, 215, 42), Color.FromArgb(195, 165, 28), true);
-                // Exhaust Stack
-                for (int y = 12; y <= 21; y++) PSet(bmp, ox + 20, y, Color.FromArgb(48, 52, 58));
-                // Giant Treaded Rear Wheel + Yellow Hub!
-                for (int y = 24; y <= 34; y++) {
-                    for (int x = 6; x <= 14; x++) {
-                        int d2 = (x - 10) * (x - 10) + (y - 29) * (y - 29);
-                        if (d2 <= 20) PSet(bmp, ox + x, y, d2 <= 5 ? Color.FromArgb(250, 215, 40) : Color.FromArgb(26, 28, 32));
+                int ox = 32 * 32;
+                // Curved horseshoe violet-titanium bridge console pedestal (y = 22..36)
+                for (int y = 22; y <= 36; y++) {
+                    for (int x = 5; x <= 26; x++) {
+                        double dx = (x - 15.5) / 10.2;
+                        double dy = (y - 29.5) / 6.2;
+                        double r2 = dx * dx + dy * dy;
+                        if (r2 > 1.0) continue;
+                        if (y <= 27) {
+                            // Sloped illuminated alien touch-glyph control surface + central holo-projector lens
+                            double lens = (x - 15.5) * (x - 15.5) + (y - 24.5) * (y - 24.5) * 3.0;
+                            Color tc = lens <= 6.5 ? Color.FromArgb(165, 255, 255) :
+                                       lens <= 15.0 ? Color.FromArgb(52, 214, 238) :
+                                       ((x + y) % 3 == 0 && r2 < 0.72) ? Color.FromArgb(245, 88, 208) :
+                                       ((x * 3 + y) % 5 == 0 && r2 < 0.72) ? Color.FromArgb(162, 252, 58) :
+                                       Color.FromArgb(136, 114, 188);
+                            PSet(bmp, ox + x, y, tc);
+                        } else {
+                            // Contoured lower console skirt with glowing cyan trim band
+                            bool border = (r2 > 0.82 || y == 36);
+                            bool band   = (y == 31);
+                            Color bc = border ? Color.FromArgb(24, 18, 38) :
+                                       band   ? Color.FromArgb(72, 242, 252) :
+                                       (x < 16) ? Color.FromArgb(124, 92, 174) : Color.FromArgb(76, 52, 122);
+                            PSet(bmp, ox + x, y, bc);
+                        }
                     }
                 }
-                // Front Wheel + Yellow Hub
-                for (int y = 28; y <= 35; y++) {
-                    for (int x = 19; x <= 25; x++) {
-                        int d2 = (x - 22) * (x - 22) + (y - 31) * (y - 31);
-                        if (d2 <= 9) PSet(bmp, ox + x, y, d2 <= 2 ? Color.FromArgb(250, 215, 40) : Color.FromArgb(26, 28, 32));
+                // Floating 3D Holographic Star-Globe + Tilted Orbital Ring hovering above console (y = 9..22)!
+                for (int y = 9; y <= 22; y++) {
+                    for (int x = 7; x <= 24; x++) {
+                        double gx = x - 15.5;
+                        double gy = y - 15.5;
+                        double sphere = gx * gx + gy * gy;
+                        // Tilted elliptical planetary orbit ring
+                        double rx = (gx * 0.92 + gy * 0.38) / 8.2;
+                        double ry = (-gx * 0.38 + gy * 0.92) / 3.0;
+                        double ring = rx * rx + ry * ry;
+                        if (ring >= 0.76 && ring <= 1.12) {
+                            PSet(bmp, ox + x, y, (x == 9 || x == 22) ? Color.FromArgb(252, 228, 64) : Color.FromArgb(88, 248, 255));
+                        } else if (sphere <= 26.0) {
+                            // Wireframe latitude/longitude hologram globe + glowing gold target vector!
+                            bool grid = (Math.Abs(gx) < 0.8) || (Math.Abs(gy) < 0.8) || (sphere >= 19.5);
+                            if (Math.Abs(gx - 1.5) < 1.1 && Math.Abs(gy + 1.0) < 1.1) {
+                                PSet(bmp, ox + x, y, Color.FromArgb(255, 228, 58)); // Target world blip!
+                            } else if (grid || ((x + y) & 1) == 0) {
+                                PSet(bmp, ox + x, y, grid ? Color.FromArgb(96, 252, 255) : Color.FromArgb(32, 164, 198));
+                            }
+                        }
+                    }
+                }
+                // Faint cyan projection beam rays from lens up into hologram
+                PSet(bmp, ox + 13, 22, Color.FromArgb(56, 218, 238));
+                PSet(bmp, ox + 18, 22, Color.FromArgb(56, 218, 238));
+            }
+
+            // 33. OBJ_UFO_COMPUTER: Alien Hyper-Wave Flight Computer / Crystal Mainframe Spire!
+            {
+                int ox = 33 * 32;
+                for (int y = 8; y <= 35; y++) {
+                    int hw = (y <= 10) ? 5 : (y <= 13) ? 7 : (y >= 34) ? 7 : 8;
+                    for (int x = 16 - hw; x <= 15 + hw; x++) {
+                        bool edge = (x == 16 - hw || x == 15 + hw || y == 8 || y == 35);
+                        bool leftCrystal  = (x >= 11 && x <= 13 && y >= 13 && y <= 29);
+                        bool rightCrystal = (x >= 18 && x <= 20 && y >= 13 && y <= 29);
+                        bool centerCore   = (x >= 15 && x <= 16 && y >= 11 && y <= 31);
+                        Color cc;
+                        if (edge) {
+                            cc = Color.FromArgb(24, 18, 38);
+                        } else if (y <= 10) {
+                            cc = (x < 16) ? Color.FromArgb(186, 198, 234) : Color.FromArgb(124, 110, 174);
+                        } else if (leftCrystal) {
+                            // Glowing Neon-Cyan optical crystal column
+                            cc = ((y + x) % 3 == 0) ? Color.FromArgb(165, 255, 255) : Color.FromArgb(44, 198, 228);
+                        } else if (rightCrystal) {
+                            // Glowing Alien Magenta/Rose telemetry column
+                            cc = ((y + x) % 3 == 0) ? Color.FromArgb(250, 112, 214) : Color.FromArgb(178, 48, 148);
+                        } else if (centerCore && (y % 4 == 0)) {
+                            cc = Color.FromArgb(168, 252, 58); // Pulsing Elerium status runes
+                        } else {
+                            cc = (x < 16) ? Color.FromArgb(122, 92, 172) : Color.FromArgb(74, 52, 118);
+                        }
+                        PSet(bmp, ox + x, y, cc);
+                    }
+                }
+            }
+
+            // 34. OBJ_UFO_CRYO: Alien Cryo-Stasis Bio-Chamber w/ Translucent Fluid & Specimen!
+            {
+                int ox = 34 * 32;
+                for (int y = 7; y <= 35; y++) {
+                    int hw = (y == 7 || y == 35) ? 4 : (y <= 9 || y >= 33) ? 6 : 7;
+                    for (int x = 16 - hw; x <= 15 + hw; x++) {
+                        bool border = (x == 16 - hw || x == 15 + hw || y == 7 || y == 35);
+                        bool cap    = (y <= 11 || y >= 30);
+                        Color sc;
+                        if (border) {
+                            sc = Color.FromArgb(22, 20, 36);
+                        } else if (cap) {
+                            // Contoured purple-titanium alloy cryo end-caps + gold/lime life-support LEDs
+                            if (y == 32 && (x == 13 || x == 18)) sc = Color.FromArgb(168, 252, 58);
+                            else if (y == 10) sc = Color.FromArgb(80, 248, 255);
+                            else sc = (x < 16) ? Color.FromArgb(148, 134, 196) : Color.FromArgb(88, 70, 136);
+                        } else {
+                            // Cylindrical glowing Teal/Emerald stasis glass + suspended alien silhouette!
+                            bool specHead = (y >= 15 && y <= 18 && x >= 14 && x <= 17);
+                            bool specBody = (y >= 19 && y <= 25 && x >= 15 && x <= 16);
+                            bool glint    = (x == 11 || (x == 12 && y % 3 == 0));
+                            bool bubble   = ((x * 7 + y * 5) % 17 == 0);
+                            if (specHead || specBody) sc = Color.FromArgb(28, 72, 78);
+                            else if (glint)           sc = Color.FromArgb(196, 255, 255);
+                            else if (bubble)          sc = Color.FromArgb(158, 255, 190);
+                            else sc = (x < 16) ? Color.FromArgb(58, 224, 228) : Color.FromArgb(28, 152, 168);
+                        }
+                        PSet(bmp, ox + x, y, sc);
+                    }
+                }
+            }
+
+            // 35. OBJ_UFO_POD: Rounded Hexagonal Alien Artifact / Ordnance Containment Pod!
+            {
+                int ox = 35 * 32;
+                for (int y = 19; y <= 35; y++) {
+                    int hw = (y <= 21) ? 5 : (y <= 24) ? 7 : (y >= 34) ? 6 : 8;
+                    for (int x = 16 - hw; x <= 15 + hw; x++) {
+                        bool border = (x == 16 - hw || x == 15 + hw || y == 19 || y == 35);
+                        bool topSeal = (y >= 20 && y <= 23 && x >= 13 && x <= 18);
+                        bool clasp   = ((x == 11 || x == 20) && y >= 24 && y <= 32);
+                        bool band    = (y == 27 || y == 28);
+                        Color pc;
+                        if (border) {
+                            pc = Color.FromArgb(24, 18, 38);
+                        } else if (topSeal) {
+                            // Glowing Elerium/Gold energy seal on top lid
+                            pc = (x >= 15 && x <= 16 && y >= 21 && y <= 22) ? Color.FromArgb(255, 232, 64) :
+                                                                              Color.FromArgb(158, 252, 56);
+                        } else if (clasp) {
+                            pc = Color.FromArgb(182, 196, 228); // Heavy titanium magnetic ribs
+                        } else if (band) {
+                            pc = (x >= 14 && x <= 17) ? Color.FromArgb(252, 148, 38) : Color.FromArgb(68, 236, 248);
+                        } else {
+                            pc = (x < 16) ? Color.FromArgb(128, 92, 178) : Color.FromArgb(78, 52, 124);
+                        }
+                        PSet(bmp, ox + x, y, pc);
+                    }
+                }
+            }
+
+            // 36. OBJ_UFO_GRAVLIFT: Circular Alien Anti-Gravity Lift Pad + Rising Energy Rings!
+            {
+                int ox = 36 * 32;
+                // Circular flush emitter pad on the UFO deck (y = 26..37)
+                for (int y = 26; y <= 37; y++) {
+                    for (int x = 4; x <= 27; x++) {
+                        double dx = (x - 15.5) / 11.0;
+                        double dy = (y - 31.5) / 5.4;
+                        double r2 = dx * dx + dy * dy;
+                        if (r2 > 1.0) continue;
+                        Color gc = r2 > 0.80 ? Color.FromArgb(142, 128, 194) :
+                                   r2 > 0.56 ? Color.FromArgb(64, 238, 252)  :
+                                   r2 > 0.25 ? Color.FromArgb(92, 56, 152)   :
+                                               Color.FromArgb(195, 255, 255);
+                        PSet(bmp, ox + x, y, gc);
+                    }
+                }
+                // Three translucent floating anti-gravity levitation rings rising toward z = 1!
+                int[] ringY  = new int[] { 22, 15, 8 };
+                double[] rxA = new double[] { 9.0, 7.8, 6.8 };
+                double[] ryA = new double[] { 4.2, 3.6, 3.2 };
+                for (int r = 0; r < 3; r++) {
+                    int cy = ringY[r];
+                    for (int y = cy - 4; y <= cy + 4; y++) {
+                        for (int x = 5; x <= 26; x++) {
+                            double dx = (x - 15.5) / rxA[r];
+                            double dy = (y - cy) / ryA[r];
+                            double d2 = dx * dx + dy * dy;
+                            if (d2 >= 0.72 && d2 <= 1.12 && ((x + y + r) & 1) == 0) {
+                                Color rc = (r == 1) ? Color.FromArgb(204, 108, 248) : Color.FromArgb(88, 250, 255);
+                                PSet(bmp, ox + x, y, rc);
+                            }
+                        }
                     }
                 }
             }
@@ -1875,5 +2724,10 @@ public class DuffArtGen {
 "@
 
 Add-Type -TypeDefinition $csharp -ReferencedAssemblies System.Drawing
-[DuffArtGen]::GenerateAll((Resolve-Path "assets").Path)
-Write-Output "Generated BMP sprite sheets in assets/!"
+if ($ObjectsOnly) {
+    [DuffArtGen]::GenObjects((Join-Path (Resolve-Path "assets").Path "OBJECTS.BMP"))
+    Write-Output "Generated assets/OBJECTS.BMP!"
+} else {
+    [DuffArtGen]::GenerateAll((Resolve-Path "assets").Path)
+    Write-Output "Generated BMP sprite sheets in assets/!"
+}

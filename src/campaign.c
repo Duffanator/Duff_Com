@@ -256,56 +256,42 @@ static int spawn_random_radar_event(int play_sfx) {
     return slot;
 }
 
-static void roll_random_squad_portraits(void) {
-    int male_pool[6] = { 0, 1, 2, 3, 4, 5 };
-    int fem_pool[6]  = { 6, 7, 8, 9, 10, 11 };
-    int genders[5]   = { 0, 1, 0, 1, 0 };
-    int m_idx = 0, f_idx = 0, i;
-
-    genders[4] = rand() & 1;
-
-    for (i = 4; i > 0; i--) {
-        int j = rand() % (i + 1);
-        int tmp = genders[i]; genders[i] = genders[j]; genders[j] = tmp;
-    }
-    for (i = 5; i > 0; i--) {
-        int jm = rand() % (i + 1);
-        int jf = rand() % (i + 1);
-        int tm = male_pool[i]; male_pool[i] = male_pool[jm]; male_pool[jm] = tm;
-        int tf = fem_pool[i];  fem_pool[i]  = fem_pool[jf];  fem_pool[jf]  = tf;
-    }
-
-    isomap_load_roster();
-    for (i = 0; i < 5; i++) {
-        int g = genders[i];
-        FILE *fp = fopen("ROSTER.CFG", "r");
-        if (!fp) fp = fopen("assets/ROSTER.CFG", "r");
-        if (fp) {
-            int slot = 0;
-            char line[64];
-            while (slot <= i && fgets(line, sizeof(line), fp)) {
-                char *p = line;
-                while (*p == ' ' || *p == '\t') p++;
-                if (*p == '#' || *p == '\r' || *p == '\n' || *p == '\0') continue;
-                if (slot == i && (p[1] == ':' || p[1] == ',')) {
-                    if (p[0] == 'M' || p[0] == 'm') g = 0;
-                    if (p[0] == 'F' || p[0] == 'f') g = 1;
-                }
-                slot++;
-            }
-            fclose(fp);
-        }
-        g_camp.squad_genders[i]   = g;
-        g_camp.squad_portraits[i] = (g == 0) ? male_pool[m_idx++ % 6] : fem_pool[f_idx++ % 6];
-    }
-}
-
 static int has_facility(int fac_id) {
     int r, c;
     for (r = 0; r < 3; r++)
         for (c = 0; c < 4; c++)
             if (g_camp.bunker_grid[r][c] == fac_id) return 1;
     return 0;
+}
+
+void campaign_sync_squad_units(void) {
+    int i;
+    int bonus_hp = has_facility(FAC_MEDBAY) ? 15 : 0;
+    int bonus_tu = has_facility(FAC_ARCADE_REC) ? 6 : 0;
+
+    for (i = 0; i < MAX_SQUAD_SIZE; i++) {
+        const Operative *op = &g_camp.squad[i];
+        Unit *u = &g_units[i];
+        operative_format_full_name(op, u->name, sizeof(u->name));
+        u->gender      = op->gender;
+        u->portrait_id = op->portrait_id % NUM_PORTRAITS;
+        u->sprite_id   = gfx_portrait_to_unit_sprite(u->portrait_id);
+        u->weapon_id   = op->weapon_id % 3;
+        u->ammo        = (u->weapon_id == 1) ? 99 : 30;
+        u->rank        = op->rank;
+        u->xp_start    = op->xp;
+        u->xp_gained   = 0;
+        u->kills       = 0;
+        u->tu_max      = op->tu_max + bonus_tu;
+        u->tu          = u->tu_max;
+        u->hp_max      = op->hp_max + bonus_hp;
+        u->hp          = u->hp_max;
+        u->energy_max  = op->energy_max;
+        u->energy      = u->energy_max;
+        u->firing_acc  = op->firing_acc;
+        u->reactions   = op->reactions;
+        u->morale      = 100;
+    }
 }
 
 void campaign_init(void) {
@@ -323,13 +309,10 @@ void campaign_init(void) {
     g_camp.elerium = 20;
     g_camp.alloys  = 30;
 
-    g_camp.squad_weapons[0] = 1; /* Cmdr. Keller starts with Prototype Laser */
-    g_camp.squad_weapons[1] = 0;
-    g_camp.squad_weapons[2] = 2;
-    g_camp.squad_weapons[3] = 0;
-    g_camp.squad_weapons[4] = 1;
-
-    roll_random_squad_portraits();
+    /* Initialize starting squad at lowest rank (ROOKIE) & populate replacement recruit pool */
+    operative_load_starting_squad(g_camp.squad, MAX_SQUAD_SIZE);
+    operative_refresh_recruit_pool(g_camp.recruit_pool, MAX_RECRUIT_POOL,
+                                   g_camp.squad, MAX_SQUAD_SIZE);
 
     /* Initial Coopersburg Underground Bunker Layout */
     g_camp.bunker_grid[0][0] = FAC_RADAR;
@@ -397,10 +380,7 @@ void campaign_tick(void) {
 }
 
 static void launch_selected_mission(void) {
-    int i;
-    int bonus_hp = has_facility(FAC_MEDBAY) ? 15 : 0;
-    int bonus_tu = has_facility(FAC_ARCADE_REC) ? 6 : 0;
-    int ev_idx   = g_camp.selected_event;
+    int ev_idx = g_camp.selected_event;
 
     if (ev_idx >= 0 && ev_idx < MAX_RADAR_EVENTS && g_camp.events[ev_idx].active) {
         g_camp.selected_sector = g_camp.events[ev_idx].biome_id;
@@ -413,29 +393,69 @@ static void launch_selected_mission(void) {
     sfx_laser();
     isomap_start_mission(g_camp.selected_sector, g_camp.deploy_night);
 
-    /* Apply Coopersburg Bunker facility perks, Portraits/Gender, & Armory loadouts to Squad */
-    for (i = 0; i < 5; i++) {
-        g_units[i].gender      = g_camp.squad_genders[i];
-        g_units[i].portrait_id = g_camp.squad_portraits[i] % NUM_PORTRAITS;
-        g_units[i].sprite_id   = gfx_portrait_to_unit_sprite(g_units[i].portrait_id);
-        g_units[i].weapon_id   = g_camp.squad_weapons[i];
-        g_units[i].ammo = (g_units[i].weapon_id == 1) ? 99 : 30;
-        g_units[i].hp_max += bonus_hp;
-        g_units[i].hp = g_units[i].hp_max;
-        g_units[i].tu_max += bonus_tu;
-        g_units[i].tu = g_units[i].tu_max;
-    }
+    /* Apply Operative Ranks, Stats, Portraits, Armory Loadouts & Bunker Perks to Squad */
+    campaign_sync_squad_units();
     g_camp.mode = 1;
 }
 
 void campaign_on_mission_complete(void) {
     int i;
-    for (i = 0; i < 5; i++) {
-        g_camp.squad_kills[i] += g_units[i].kills;
+    int kia_cnt = 0;
+    int promo_cnt = 0;
+    int focus_slot = -1;
+    char promo_name[24] = "";
+    char recruit_name[24] = "";
+    int mission_won = (g_battle.mission_ended == 1);
+    int contested_retreat = (!mission_won && g_battle.mission_ended == 0 &&
+                             (g_battle.turn_number > 1 || g_battle.aliens_killed > 0));
+
+    for (i = 0; i < MAX_SQUAD_SIZE; i++) {
+        Operative *op = &g_camp.squad[i];
+        Unit *u = &g_units[i];
+        int fell_in_action = (!u->active || u->is_corpse || u->hp <= 0);
+
+        if (fell_in_action) {
+            kia_cnt++;
+            g_camp.total_kia++;
+            operative_hire_replacement(op, g_camp.recruit_pool, MAX_RECRUIT_POOL,
+                                       g_camp.squad, MAX_SQUAD_SIZE);
+            if (recruit_name[0] == '\0') {
+                operative_format_full_name(op, recruit_name, sizeof(recruit_name));
+            }
+            if (focus_slot < 0) focus_slot = i;
+        } else {
+            int surv_xp = 0;
+            int gained;
+            op->kills += u->kills;
+            if (mission_won) {
+                surv_xp = XP_MISSION_VICTORY + (g_battle.night_mode ? XP_NIGHT_BONUS : 0);
+                op->missions++;
+            } else if (contested_retreat || u->xp_gained > 0) {
+                surv_xp = XP_MISSION_RETREAT;
+                op->missions++;
+            }
+            gained = u->xp_gained + surv_xp;
+            if (operative_add_xp(op, gained) > 0) {
+                if (promo_cnt == 0) {
+                    operative_format_full_name(op, promo_name, sizeof(promo_name));
+                    focus_slot = i;
+                }
+                promo_cnt++;
+            }
+        }
     }
-    g_camp.total_kills += g_battle.aliens_killed;
-    g_camp.elerium += g_battle.elerium_recovered;
-    g_camp.alloys  += g_battle.alloys_recovered;
+
+    if (focus_slot >= 0) {
+        g_camp.selected_soldier = focus_slot;
+    }
+
+    g_camp.total_kills   += g_battle.aliens_killed;
+    g_camp.elerium       += g_battle.elerium_recovered;
+    g_camp.alloys        += g_battle.alloys_recovered;
+    g_camp.nav_units     += g_battle.nav_recovered;
+    g_camp.cryo_pods     += g_battle.cryo_recovered;
+    g_camp.tech_pods     += g_battle.pods_recovered;
+    g_camp.alien_corpses += g_battle.corpses_recovered;
 
     /* Clear the completed Alien Event from the radar & advance Valley time +3 hrs */
     if (g_camp.launched_event >= 0 && g_camp.launched_event < MAX_RADAR_EVENTS) {
@@ -452,11 +472,46 @@ void campaign_on_mission_complete(void) {
         g_camp.next_spawn_timer = 75;
     }
 
-    if (g_battle.mission_ended == 1) {
+    if (promo_cnt > 0) {
+        sfx_beep(523, 45);
+        sfx_beep(659, 45);
+        sfx_beep(784, 75);
+    }
+
+    if (mission_won) {
         g_camp.missions_won++;
+        if (promo_cnt == 1 && kia_cnt == 0) {
+            snprintf(g_camp.notice, sizeof(g_camp.notice),
+                     "PROMOTED: %s! (+%dA +%dE)",
+                     promo_name, g_battle.alloys_recovered, g_battle.elerium_recovered);
+        } else if (promo_cnt > 1 && kia_cnt == 0) {
+            snprintf(g_camp.notice, sizeof(g_camp.notice),
+                     "VICTORY! %d PROMOTED (%s)!", promo_cnt, promo_name);
+        } else if (kia_cnt == 1) {
+            snprintf(g_camp.notice, sizeof(g_camp.notice),
+                     "1 KIA! %s JOINED SQUAD", recruit_name);
+        } else if (kia_cnt > 1) {
+            snprintf(g_camp.notice, sizeof(g_camp.notice),
+                     "VICTORY! %d KIA - NEW ROOKIES ASSIGNED", kia_cnt);
+        } else if (g_battle.nav_recovered + g_battle.cryo_recovered + g_battle.pods_recovered > 0) {
+            snprintf(g_camp.notice, sizeof(g_camp.notice),
+                     "SECURED! +%dA +%dE +%dNAV +%dCRYO +%dPOD",
+                     g_battle.alloys_recovered, g_battle.elerium_recovered,
+                     g_battle.nav_recovered, g_battle.cryo_recovered, g_battle.pods_recovered);
+        } else {
+            snprintf(g_camp.notice, sizeof(g_camp.notice),
+                     "VICTORY! +%d ALLOYS, +%d ELERIUM (+XP)",
+                     g_battle.alloys_recovered, g_battle.elerium_recovered);
+        }
+    } else if (kia_cnt == 1) {
         snprintf(g_camp.notice, sizeof(g_camp.notice),
-                 "VICTORY! +%d ALLOYS, +%d ELERIUM",
-                 g_battle.alloys_recovered, g_battle.elerium_recovered);
+                 "1 KIA! %s JOINED SQUAD", recruit_name);
+    } else if (kia_cnt > 1) {
+        snprintf(g_camp.notice, sizeof(g_camp.notice),
+                 "%d KIA! NEW ROOKIES ASSIGNED AT HQ", kia_cnt);
+    } else if (promo_cnt > 0) {
+        snprintf(g_camp.notice, sizeof(g_camp.notice),
+                 "HQ RETURN: %s PROMOTED!", promo_name);
     } else {
         snprintf(g_camp.notice, sizeof(g_camp.notice),
                  "SKYRANGER RETURNED TO COOPERSBURG HQ");
@@ -696,9 +751,13 @@ static void render_radar_tab(void) {
 
 static void render_bunker_tab(void) {
     int r, c;
-    /* Coopersburg Surface Grass & House/Arcade Cutaway Header */
-    vga_rect_fill(8, 28, 304, 18, 22);
-    vga_print_shadow(14, 33, "COOPERSBURG UNDERGROUND HQ (ALLOYS:15/ROOM)", 96, 15);
+    char vault_buf[64];
+    /* Coopersburg Surface Grass & Recovered UFO Tech Vault Header */
+    vga_rect_bevel(8, 28, 304, 19, 22, 18, 26);
+    vga_print_shadow(14, 30, "COOPERSBURG UNDERGROUND HQ (ALLOYS:15/ROOM)", 96, 15);
+    snprintf(vault_buf, sizeof(vault_buf), "UFO VAULT: NAV:%d  CRYO:%d  PODS:%d  BODIES:%d",
+             g_camp.nav_units, g_camp.cryo_pods, g_camp.tech_pods, g_camp.alien_corpses);
+    vga_print_shadow(14, 39, vault_buf, 80, 15);
 
     /* 3x4 Underground Facility Grid */
     for (r = 0; r < 3; r++) {
@@ -732,52 +791,98 @@ static void render_bunker_tab(void) {
 
 static void render_armory_tab(void) {
     int i;
-    int sel = g_camp.selected_soldier % 5;
+    int sel = g_camp.selected_soldier % MAX_SQUAD_SIZE;
+    const Operative *op = &g_camp.squad[sel];
+    int bonus_hp = has_facility(FAC_MEDBAY) ? 15 : 0;
+    int bonus_tu = has_facility(FAC_ARCADE_REC) ? 6 : 0;
     static const char *wep_short[3] = { "RIFLE", "LASER", "PLASMA" };
     static const char *wep_full[3]  = { "ASSAULT RIFLE", "LASER RIFLE", "HEAVY PLASMA" };
-    char kbuf[24];
-    isomap_load_roster();
+    char kbuf[32];
 
-    /* Left Panel: Selected Operative Portrait & Bio Dossier (x=8, y=28, w=86, h=136) */
+    /* Left Panel: Selected Operative Portrait, Rank, XP & Stats Dossier (x=8, y=28, w=86, h=136) */
     vga_rect_bevel(8, 28, 86, 136, 76, 80, 79);
-    vga_print_shadow(19, 32, "AGENT BIO", 96, 15);
-
-    vga_rect_bevel(33, 42, 36, 38, 14, 96, 79);
-    vga_blit_ui(35, 43, 32, 36, spr_portraits[g_camp.squad_portraits[sel] % NUM_PORTRAITS]);
-
-    vga_print_shadow(14, 84, g_camp.squad_genders[sel] ? "SEX: FEMALE" : "SEX: MALE",
-                     g_camp.squad_genders[sel] ? 96 : 80, 15);
-    snprintf(kbuf, sizeof(kbuf), "KILLS: %d", g_camp.squad_kills[sel]);
-    vga_print(14, 94, kbuf, 18);
-    vga_print(13, 105, wep_full[g_camp.squad_weapons[sel] % 3], 2);
-
-    /* [NEW FACE] & [SEX: M/F] Customization Buttons */
     {
-        int hov_face = (g_input.mx >= 13 && g_input.mx < 89 && g_input.my >= 118 && g_input.my < 136);
-        int hov_sex  = (g_input.mx >= 13 && g_input.mx < 89 && g_input.my >= 139 && g_input.my < 157);
-        vga_rect_bevel(13, 118, 76, 18, hov_face ? 65 : 68, hov_face ? 96 : 162, 79);
-        vga_print_shadow(21, 124, "NEXT FACE", 96, 15);
-
-        vga_rect_bevel(13, 139, 76, 18, hov_sex ? 65 : 68, hov_sex ? 96 : 162, 79);
-        vga_print_shadow(18, 145, g_camp.squad_genders[sel] ? "FLIP: MALE" : "FLIP: FEM.", 80, 15);
+        const char *rname = operative_rank_name(op->rank);
+        int hdr_w = 11 + (int)strlen(rname) * 6;
+        int hdr_x = 8 + (86 - hdr_w) / 2;
+        operative_draw_rank_badge(hdr_x, 31, op->rank);
+        vga_print_shadow(hdr_x + 11, 31, rname, 96, 15);
     }
 
-    /* Right Panel: 5-Agent Squad Roster & Weapon Equip List (x=98, y=28, w=214, h=136) */
+    vga_print(14, 43, op->gender ? "F" : "M", op->gender ? 96 : 80);
+    snprintf(kbuf, sizeof(kbuf), "#%d", sel + 1);
+    vga_print(73, 43, kbuf, 2);
+
+    vga_rect_bevel(33, 40, 36, 38, 14, 96, 79);
+    vga_blit_ui(35, 41, 32, 36, spr_portraits[op->portrait_id % NUM_PORTRAITS]);
+
+    /* XP Readout & Progress Bar toward Next Promotion */
+    {
+        int fill = 74;
+        if (op->rank < RANK_COMMANDER) {
+            int cur_req = operative_rank_xp_req(op->rank);
+            int nxt_req = operative_next_rank_xp(op->rank);
+            int span = (nxt_req > cur_req) ? (nxt_req - cur_req) : 1;
+            fill = ((op->xp - cur_req) * 74) / span;
+            if (fill < 0) fill = 0;
+            if (fill > 74) fill = 74;
+            snprintf(kbuf, sizeof(kbuf), "XP:%d/%d", op->xp, nxt_req);
+        } else {
+            snprintf(kbuf, sizeof(kbuf), "XP:%d MAX", op->xp);
+        }
+        vga_print(13, 80, kbuf, 96);
+        vga_rect_bevel(13, 89, 76, 5, 14, 10, 15);
+        if (fill > 0) {
+            vga_rect_fill(14, 90, fill, 3, (op->rank == RANK_COMMANDER) ? 96 : 80);
+        }
+    }
+
+    snprintf(kbuf, sizeof(kbuf), "TU:%2d  HP:%2d", op->tu_max + bonus_tu, op->hp_max + bonus_hp);
+    vga_print(13, 97, kbuf, 18);
+
+    snprintf(kbuf, sizeof(kbuf), "AIM:%2d RCN:%2d", op->firing_acc, op->reactions);
+    vga_print(12, 107, kbuf, 80);
+
+    snprintf(kbuf, sizeof(kbuf), "KLS:%2d MSN:%2d", op->kills, op->missions);
+    vga_print(12, 117, kbuf, 2);
+
+    vga_print(12, 127, wep_full[op->weapon_id % 3], 96);
+
+    /* Side-by-Side [FACE] & [MALE]/[FEM] Customization Buttons */
+    {
+        int hov_face = (g_input.mx >= 12 && g_input.mx < 49 && g_input.my >= 139 && g_input.my < 157);
+        int hov_sex  = (g_input.mx >= 51 && g_input.mx < 89 && g_input.my >= 139 && g_input.my < 157);
+        vga_rect_bevel(12, 139, 37, 18, hov_face ? 65 : 68, hov_face ? 96 : 162, 79);
+        vga_print_shadow(19, 145, "FACE", 96, 15);
+
+        vga_rect_bevel(51, 139, 38, 18, hov_sex ? 65 : 68, hov_sex ? 96 : 162, 79);
+        vga_print_shadow(op->gender ? 61 : 58, 145, op->gender ? "FEM" : "MALE", 80, 15);
+    }
+
+    /* Right Panel: 5-Agent Squad Roster, Ranks, Stats & Weapon Equip List (x=98, y=28, w=214, h=136) */
     vga_rect_bevel(98, 28, 214, 136, 76, 80, 79);
     vga_print_shadow(104, 33, "SQUAD ROSTER (CLICK AGENT/WEP)", 96, 15);
 
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < MAX_SQUAD_SIZE; i++) {
+        const Operative *rop = &g_camp.squad[i];
+        char full_name[24];
+        char sbuf[32];
         int ry = 45 + i * 23;
-        int w = g_camp.squad_weapons[i] % 3;
+        int w = rop->weapon_id % 3;
         int is_sel = (i == sel);
         int hov = (g_input.mx >= 103 && g_input.mx < 307 && g_input.my >= ry && g_input.my < ry + 21);
 
         vga_rect_bevel(103, ry, 204, 21, is_sel ? 65 : (hov ? 68 : 74), (is_sel || hov) ? 96 : 68, 79);
-        vga_print(107, ry + 7, g_camp.squad_genders[i] ? "F" : "M", g_camp.squad_genders[i] ? 96 : 80);
-        vga_print_shadow(118, ry + 7, g_units[i].name, is_sel ? 96 : 1, 15);
+        operative_draw_rank_badge(107, ry + 3, rop->rank);
+        operative_format_full_name(rop, full_name, sizeof(full_name));
+        vga_print_shadow(118, ry + 3, full_name, is_sel ? 96 : 0, 15);
 
-        vga_blit_ui(214, ry - 1, 40, 24, spr_weapons[w]);
-        vga_print_shadow(256, ry + 7, wep_short[w], 80, 15);
+        snprintf(sbuf, sizeof(sbuf), "TU:%d AIM:%d K:%d",
+                 rop->tu_max + bonus_tu, rop->firing_acc, rop->kills);
+        vga_print(107, ry + 12, sbuf, is_sel ? 80 : 18);
+
+        vga_blit_ui(215, ry - 1, 40, 24, spr_weapons[w]);
+        vga_print_shadow(257, ry + 7, wep_short[w], 80, 15);
     }
 }
 
@@ -809,8 +914,10 @@ void campaign_render(void) {
 
     /* Bottom Status & Resource Strip + Trackball [OPTIONS] Button */
     vga_rect_bevel(0, 168, SCREEN_W, 32, 166, 162, 171);
-    snprintf(res_buf, sizeof(res_buf), "ALLOYS:%d  ELERIUM:%d  VICTORIES:%d  KILLS:%d",
-             g_camp.alloys, g_camp.elerium, g_camp.missions_won, g_camp.total_kills);
+    snprintf(res_buf, sizeof(res_buf), "ALLOY:%d ELER:%d TECH:%d WINS:%d KILLS:%d KIA:%d",
+             g_camp.alloys, g_camp.elerium,
+             g_camp.nav_units + g_camp.cryo_pods + g_camp.tech_pods,
+             g_camp.missions_won, g_camp.total_kills, g_camp.total_kia);
     vga_print_shadow(8, 173, res_buf, 80, 15);
     vga_print(8, 185, g_camp.notice, 96);
     {
@@ -922,6 +1029,21 @@ void campaign_handle_input(void) {
             }
             return;
         }
+    } else if (g_camp.active_tab == 2) {
+        if (g_input.last_key == KEY_UP) {
+            g_camp.selected_soldier = (g_camp.selected_soldier + MAX_SQUAD_SIZE - 1) % MAX_SQUAD_SIZE;
+            sfx_click();
+        }
+        if (g_input.last_key == KEY_DOWN) {
+            g_camp.selected_soldier = (g_camp.selected_soldier + 1) % MAX_SQUAD_SIZE;
+            sfx_click();
+        }
+        if (g_input.last_key == KEY_ENTER || g_input.last_key == ' ') {
+            int s = g_camp.selected_soldier % MAX_SQUAD_SIZE;
+            g_camp.squad[s].weapon_id = (g_camp.squad[s].weapon_id + 1) % 3;
+            sfx_click();
+            return;
+        }
     }
 
     if (!g_input.left_clicked) return;
@@ -1003,28 +1125,29 @@ void campaign_handle_input(void) {
             }
         }
     } else if (g_camp.active_tab == 2) {
-        int sel = g_camp.selected_soldier % 5;
-        /* Left Bio Panel: [NEXT FACE] button cycles portraits within current gender */
-        if (mx >= 13 && mx < 89 && my >= 118 && my < 136) {
-            int base = g_camp.squad_genders[sel] ? 6 : 0;
-            int next_off = ((g_camp.squad_portraits[sel] - base) + 1) % 6;
-            g_camp.squad_portraits[sel] = base + next_off;
+        int sel = g_camp.selected_soldier % MAX_SQUAD_SIZE;
+        Operative *op = &g_camp.squad[sel];
+        /* Left Bio Panel: [FACE] button cycles portraits within current gender */
+        if (mx >= 12 && mx < 49 && my >= 139 && my < 157) {
+            int base = op->gender ? 6 : 0;
+            int next_off = ((op->portrait_id - base) + 1) % 6;
+            op->portrait_id = base + next_off;
             sfx_click();
             return;
         }
-        /* Left Bio Panel: [FLIP: MALE/FEM.] button toggles gender & assigns matching portrait */
-        if (mx >= 13 && mx < 89 && my >= 139 && my < 157) {
-            g_camp.squad_genders[sel] ^= 1;
-            g_camp.squad_portraits[sel] = (g_camp.squad_genders[sel] ? 6 : 0) + (rand() % 6);
+        /* Left Bio Panel: [MALE]/[FEM] button toggles gender & assigns matching portrait */
+        if (mx >= 51 && mx < 89 && my >= 139 && my < 157) {
+            op->gender ^= 1;
+            op->portrait_id = (op->gender ? 6 : 0) + (rand() % 6);
             sfx_click();
             return;
         }
         /* Right Squad List: Clicking an agent selects them; clicking weapon or re-clicking cycles weapon */
         if (mx >= 103 && mx < 307 && my >= 45 && my < 160) {
             int idx = (my - 45) / 23;
-            if (idx >= 0 && idx < 5) {
+            if (idx >= 0 && idx < MAX_SQUAD_SIZE) {
                 if (g_camp.selected_soldier == idx || mx >= 210) {
-                    g_camp.squad_weapons[idx] = (g_camp.squad_weapons[idx] + 1) % 3;
+                    g_camp.squad[idx].weapon_id = (g_camp.squad[idx].weapon_id + 1) % 3;
                 }
                 g_camp.selected_soldier = idx;
                 sfx_click();

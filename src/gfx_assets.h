@@ -45,6 +45,12 @@ enum {
     FLOOR_WOOD,         /* Barn / upstairs wood planks */
     FLOOR_ROOF_TAR,     /* Flat roof gravel/tar */
     FLOOR_SCORCHED,     /* UFO crash scorch mark */
+    FLOOR_UFO_DECK,     /* Futuristic alien alloy deck plating w/ cyan conduits */
+    FLOOR_UFO_ROOF,     /* Rounded/beveled alien saucer upper dome plating */
+    FLOOR_UFO_ROOF_N,   /* Rounded alien saucer dome North corner cap */
+    FLOOR_UFO_ROOF_E,   /* Rounded alien saucer dome East corner cap */
+    FLOOR_UFO_ROOF_S,   /* Rounded alien saucer dome South corner cap */
+    FLOOR_UFO_ROOF_W,   /* Rounded alien saucer dome West corner cap */
     FLOOR_COUNT
 };
 
@@ -56,7 +62,7 @@ enum {
     WALL_DINER_CHROME,  /* Route 309 Diner chrome & neon siding (85 HP) */
     WALL_DINER_GLASS,   /* Diner panoramic booth window (60 HP) */
     WALL_BARN_WOOD,     /* Red Pennsylvania barn plank wall (45 HP) */
-    WALL_STEEL,         /* Industrial / UFO metallic bulkhead (130 HP) */
+    WALL_STEEL,         /* Industrial steel bulkhead (130 HP) */
     WALL_DOOR_CLOSED,   /* Swinging/sliding door - closed (38 HP) */
     WALL_DOOR_OPEN,     /* Door frame - open (38 HP) */
     WALL_FENCE,         /* Low wooden/chain perimeter fence (20 HP) */
@@ -67,26 +73,65 @@ enum {
     WALL_BARN_DMG,      /* Splintered PA barn planks with blown-out gaps */
     WALL_STEEL_DMG,     /* Scorched, dented steel bulkhead w/ ruptured conduit */
     WALL_FENCE_DMG,     /* Half-shattered fence with snapped rails & pickets */
+    WALL_UFO_HULL,      /* Rounded convex futuristic alien saucer hull (160 HP) */
+    WALL_UFO_HULL_DMG,  /* Scorched, buckled alien saucer hull w/ plasma leak */
+    WALL_UFO_DOOR_CLOSED,/* Rounded oval alien containment airlock - closed (65 HP) */
+    WALL_UFO_DOOR_OPEN, /* Rounded oval alien containment airlock - open (65 HP) */
     WALL_COUNT
 };
 
-/* Object / Prop IDs */
+/* Object / Prop IDs (Vehicles span 2 full tiles: Back + Front along +X or +Y) */
 enum {
     OBJ_NONE = 0,
-    OBJ_ARCADE_CAB,     /* Glowing 90s Arcade Cabinet ("DUFF-COM" / "POLYBIUS") */
-    OBJ_DINER_BOOTH,    /* Red vinyl diner booth & table */
-    OBJ_JUKEBOX,        /* Glowing Wurlitzer jukebox */
-    OBJ_CORN,           /* Tall Pennsylvania cornstalks (blocks LOS, flammable!) */
-    OBJ_STREETLAMP,     /* Route 309 streetlamp (emits light at night) */
-    OBJ_CAR_HOOD,       /* Parked Cruiser / Sedan */
-    OBJ_UFO_CORE,       /* Glowing Alien Elerium Power Core */
-    OBJ_CRATE,          /* Supply / Ammo crate */
-    OBJ_STAIRS_UP,      /* Stairs leading up to next elevation level */
-    OBJ_RUBBLE,         /* Destroyed wall / object rubble */
-    OBJ_FLARE,          /* Throwable Night Electro-Flare (bright light radius) */
-    OBJ_BARREL,         /* Explosive Fuel / Chemical Drum (detonates when shot!) */
-    OBJ_TRACTOR,        /* Pennsylvania Farm Tractor */
+    OBJ_ARCADE_CAB,      /* Glowing 90s Arcade Cabinet ("DUFF-COM" / "POLYBIUS") */
+    OBJ_DINER_BOOTH,     /* Red vinyl diner booth & table */
+    OBJ_JUKEBOX,         /* Glowing Wurlitzer jukebox */
+    OBJ_CORN,            /* Tall Pennsylvania cornstalks (blocks LOS, flammable!) */
+    OBJ_STREETLAMP,      /* Route 309 streetlamp (emits light at night) */
+    OBJ_CAR_HOOD,        /* Police Cruiser (+X 2x1 Back tile) */
+    OBJ_UFO_CORE,        /* Glowing Alien Elerium Power Core */
+    OBJ_CRATE,           /* Supply / Ammo crate */
+    OBJ_STAIRS_UP,       /* Stairs leading up to next elevation level */
+    OBJ_RUBBLE,          /* Destroyed wall / object rubble */
+    OBJ_FLARE,           /* Throwable Night Electro-Flare (bright light radius) */
+    OBJ_BARREL,          /* Explosive Fuel / Chemical Drum (detonates when shot!) */
+    OBJ_TRACTOR,         /* PA Farm Tractor (+X 2x1 Back tile) */
+    OBJ_CAR_FRONT_X,     /* Police Cruiser (+X 2x1 Front tile) */
+    OBJ_CAR_BACK_Y,      /* Police Cruiser (+Y 1x2 Back tile) */
+    OBJ_CAR_FRONT_Y,     /* Police Cruiser (+Y 1x2 Front tile) */
+    OBJ_TRACTOR_FRONT_X, /* PA Farm Tractor (+X 2x1 Front tile) */
+    OBJ_TRACTOR_BACK_Y,  /* PA Farm Tractor (+Y 1x2 Back tile) */
+    OBJ_TRACTOR_FRONT_Y, /* PA Farm Tractor (+Y 1x2 Front tile) */
+    OBJ_SEDAN_BACK_X,    /* Civilian Sedan (+X 2x1 Back tile) */
+    OBJ_SEDAN_FRONT_X,   /* Civilian Sedan (+X 2x1 Front tile) */
+    OBJ_SEDAN_BACK_Y,    /* Civilian Sedan (+Y 1x2 Back tile) */
+    OBJ_SEDAN_FRONT_Y,   /* Civilian Sedan (+Y 1x2 Front tile) */
+    OBJ_PICKUP_BACK_X,   /* Utility Pickup Truck (+X 2x1 Back tile) */
+    OBJ_PICKUP_FRONT_X,  /* Utility Pickup Truck (+X 2x1 Front tile) */
+    OBJ_PICKUP_BACK_Y,   /* Utility Pickup Truck (+Y 1x2 Back tile) */
+    OBJ_PICKUP_FRONT_Y,  /* Utility Pickup Truck (+Y 1x2 Front tile) */
+    OBJ_UFO_CORNER_N,    /* 3D Curved Alien Saucer Hull Fairing (North Corner) */
+    OBJ_UFO_CORNER_E,    /* 3D Curved Alien Saucer Hull Fairing (East Corner) */
+    OBJ_UFO_CORNER_S,    /* 3D Curved Alien Saucer Hull Fairing (South Corner) */
+    OBJ_UFO_CORNER_W,    /* 3D Curved Alien Saucer Hull Fairing (West Corner) */
+    OBJ_UFO_NAV,         /* Alien Navigation Console w/ 3D Holographic Star-Chart */
+    OBJ_UFO_COMPUTER,    /* Alien Hyper-Wave Flight Computer / Telemetry Array */
+    OBJ_UFO_CRYO,        /* Alien Cryo-Stasis Bio-Chamber */
+    OBJ_UFO_POD,         /* Alien Artifact / Ordnance Containment Pod */
+    OBJ_UFO_GRAVLIFT,    /* Alien Anti-Gravity Lift Pad (ascends/descends z-levels) */
     OBJ_COUNT
+};
+
+#define OBJ_CAR_BACK_X     OBJ_CAR_HOOD
+#define OBJ_TRACTOR_BACK_X OBJ_TRACTOR
+
+/* 2-Tile Vehicle Kinds */
+enum {
+    VEH_CRUISER = 0, /* Coopersburg Police Cruiser */
+    VEH_SEDAN   = 1, /* 90s Civilian Sedan */
+    VEH_PICKUP  = 2, /* Heavy Utility / Farm Pickup Truck */
+    VEH_TRACTOR = 3, /* Pennsylvania Farm Tractor */
+    VEH_KIND_COUNT = 4
 };
 
 extern uint8_t spr_floors[FLOOR_COUNT][TILE_W * TILE_H];
@@ -132,7 +177,9 @@ extern uint8_t spr_weapons[4][40 * 24];
 
 /* Optional full-frame BMP graphic resources loaded from assets/*.BMP */
 extern uint8_t *gfx_title_bg;   /* 320x200 Title Screen artwork (TITLEBG.BMP) */
-extern uint8_t *gfx_hidden_bg;  /* 232x92 Hidden Movement artwork (HIDDEN.BMP) */
+extern uint8_t *gfx_hidden_bg;  /* Hidden Movement artwork (HIDDEN.BMP) */
+extern int      gfx_hidden_w;   /* Width of loaded HIDDEN.BMP */
+extern int      gfx_hidden_h;   /* Height of loaded HIDDEN.BMP */
 extern uint8_t *gfx_radar_bg;   /* 300x132 Full-Width Lehigh Valley Radar Map (RADAR.BMP) */
 
 void gfx_init_assets(void);

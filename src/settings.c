@@ -111,7 +111,12 @@ int settings_alien_post_shot_frames(void) {
 }
 
 int settings_hidden_banner_frames(void) {
-    static const int tbl[3] = { 50, 34, 20 };
+    static const int tbl[3] = { 70, 50, 32 };
+    return tbl[g_settings.anim_speed % 3];
+}
+
+int settings_turn_splash_frames(void) {
+    static const int tbl[3] = { 210, 168, 120 };
     return tbl[g_settings.anim_speed % 3];
 }
 

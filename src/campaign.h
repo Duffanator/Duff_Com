@@ -1,6 +1,8 @@
 #ifndef CAMPAIGN_H
 #define CAMPAIGN_H
 
+#include "operative.h"
+
 #define MAX_RADAR_EVENTS 3
 
 typedef struct {
@@ -24,12 +26,15 @@ typedef struct {
     int deploy_night;       /* 0 = Day Mission, 1 = Night Mission */
     int missions_won;
     int total_kills;
+    int total_kia;          /* Career fallen operatives (permadeath memorial count) */
     int elerium;
     int alloys;
-    int squad_weapons[5];   /* Equipped weapon per squad member (0=Rifle, 1=Laser, 2=Plasma) */
-    int squad_genders[5];   /* 0 = Male, 1 = Female */
-    int squad_portraits[5]; /* 0..5 Male portraits, 6..11 Female portraits */
-    int squad_kills[5];
+    int nav_units;          /* Recovered intact UFO Navigation / Flight Computers */
+    int cryo_pods;          /* Recovered intact Alien Cryo-Stasis Chambers */
+    int tech_pods;          /* Recovered intact Alien Tech / Ordnance Pods */
+    int alien_corpses;      /* Recovered Alien Corpses in HQ Vault */
+    Operative squad[MAX_SQUAD_SIZE];         /* Active 5-agent Skyranger strike squad */
+    Operative recruit_pool[MAX_RECRUIT_POOL];/* Ready-to-hire rookie pool for replacements/future barracks */
     int selected_soldier;   /* Highlighted operative in 3.SQUAD ARMORY (0..4) */
     int bunker_grid[3][4];  /* 3 rows x 4 cols underground Coopersburg Bunker facilities */
     char notice[48];
@@ -51,6 +56,7 @@ typedef struct {
 extern CampaignState g_camp;
 
 void campaign_init(void);
+void campaign_sync_squad_units(void);
 void campaign_tick(void);
 void campaign_on_mission_complete(void);
 void campaign_render(void);

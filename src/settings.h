@@ -40,6 +40,7 @@ int settings_death_step_frames(void);
 int settings_alien_step_frames(void);
 int settings_alien_post_shot_frames(void);
 int settings_hidden_banner_frames(void);
+int settings_turn_splash_frames(void);
 int settings_scroll_px(void);
 
 #endif /* SETTINGS_H */

@@ -20,6 +20,8 @@ uint8_t spr_weapons[4][40 * 24];
 
 uint8_t *gfx_title_bg  = NULL;
 uint8_t *gfx_hidden_bg = NULL;
+int      gfx_hidden_w  = 0;
+int      gfx_hidden_h  = 0;
 uint8_t *gfx_radar_bg  = NULL;
 
 /* Helper: check if pixel (x,y) is inside a 32x16 isometric diamond */
@@ -104,8 +106,39 @@ static void build_floors(void) {
                         col = (uint8_t)(11 + (hash & 3));
                         if (hash == 0 && (x > 10 && x < 22)) col = 146; /* Elerium residue */
                         break;
+
+                    case FLOOR_UFO_DECK: {
+                        int u = (x - 16) + (y - 8) * 2 + 64;
+                        int v = (x - 16) - (y - 8) * 2 + 64;
+                        if ((u % 12 == 0) || (v % 12 == 0))
+                            col = ((u + v) % 24 == 0) ? 81 : 88;
+                        else if ((u % 12 == 1) || (v % 12 == 1))
+                            col = 132;
+                        else
+                            col = (uint8_t)(136 + (hash & 3));
+                        break;
+                    }
+
+                    case FLOOR_UFO_ROOF:
+                    case FLOOR_UFO_ROOF_N:
+                    case FLOOR_UFO_ROOF_E:
+                    case FLOOR_UFO_ROOF_S:
+                    case FLOOR_UFO_ROOF_W: {
+                        if (f != FLOOR_UFO_ROOF) {
+                            int uf2 = x + 2 * y - 15;
+                            int vf2 = 2 * y - x + 16;
+                            int pu2 = (f == FLOOR_UFO_ROOF_N || f == FLOOR_UFO_ROOF_W) ? 30 : 0;
+                            int pv2 = (f == FLOOR_UFO_ROOF_N || f == FLOOR_UFO_ROOF_E) ? 30 : 0;
+                            int d2  = (uf2 - pu2) * (uf2 - pu2) + (vf2 - pv2) * (vf2 - pv2);
+                            if (d2 > 930) { col = COL_TRANS; break; }
+                            if (d2 >= 720) { col = (d2 >= 830) ? 162 : 81; break; }
+                        }
+                        col = (uint8_t)(is_diamond_edge(x, y) ? 132 : (162 + (hash & 3)));
+                        if (x == 16 && y == 8) col = 81;
+                        break;
+                    }
                 }
-                spr_floors[f][y * TILE_W + x] = col;
+                if (col != COL_TRANS) spr_floors[f][y * TILE_W + x] = col;
             }
         }
     }
@@ -256,10 +289,56 @@ static void build_walls(void) {
                             col_w = COL_TRANS; col_n = COL_TRANS;
                         }
                         break;
+
+                    case WALL_UFO_HULL:
+                    case WALL_UFO_HULL_DMG: {
+                        int z = 23 - y;
+                        int bow = ((z - 12) * (z - 12)) / 36;
+                        int rib = ((x + bow) & 7) == 0;
+                        if (z == 12) {
+                            col_w = ((x % 6) == 0) ? 144 : 81;
+                            col_n = ((x % 6) == 0) ? 146 : 83;
+                        } else if (z == 11 || z == 13) {
+                            col_w = 138; col_n = 140;
+                        } else if (z >= 14) {
+                            int step = (23 - z) / 2;
+                            col_w = (uint8_t)(rib ? (133 + step) : (161 + step));
+                            col_n = (uint8_t)(rib ? (136 + step) : (164 + step));
+                        } else {
+                            int step = (10 - z) / 2;
+                            col_w = (uint8_t)(rib ? (137 + step) : (132 + step));
+                            col_n = (uint8_t)(rib ? (140 + step) : (135 + step));
+                        }
+                        if (w == WALL_UFO_HULL_DMG && x >= 5 && x <= 10 && y >= 9 && y <= 14) {
+                            col_w = (x == 8 && y == 11) ? 144 : 13;
+                            col_n = (x == 8 && y == 11) ? 146 : 14;
+                        }
+                        break;
+                    }
+
+                    case WALL_UFO_DOOR_CLOSED:
+                    case WALL_UFO_DOOR_OPEN: {
+                        int dx2 = (x * 2 - 15) * 3;
+                        int dy2 = (y * 2 - 25) * 2;
+                        int ell = dx2 * dx2 + dy2 * dy2;
+                        if (ell > 960) {
+                            col_w = (y < 11) ? 163 : 134;
+                            col_n = (y < 11) ? 166 : 137;
+                        } else if (ell >= 680) {
+                            col_w = 81; col_n = 83;
+                        } else if (w == WALL_UFO_DOOR_OPEN) {
+                            col_w = COL_TRANS; col_n = COL_TRANS;
+                        } else if (ell <= 120) {
+                            col_w = 144; col_n = 146;
+                        } else {
+                            col_w = 133; col_n = 136;
+                        }
+                        break;
+                    }
                 }
 
                 /* Top wall edge highlight for crisp 3D readability */
-                if (y == 0 && col_w != COL_TRANS) {
+                if (y == 0 && col_w != COL_TRANS && w < WALL_UFO_HULL) {
                     col_w = 4;
                     col_n = 6;
                 }
@@ -279,6 +358,312 @@ static void obj_rect(int id, int x0, int y0, int w, int h, uint8_t col) {
         for (x = x0; x < x0 + w; x++) {
             if ((unsigned)x < OBJ_W && (unsigned)y < OBJ_H) {
                 spr_objects[id][y * OBJ_W + x] = col;
+            }
+        }
+    }
+}
+
+static uint8_t shade_vehicle_mat(int veh_kind, uint8_t mat, int tone) {
+    switch (mat) {
+        case 1:
+            if (veh_kind == VEH_CRUISER) return (uint8_t)(tone == 0 ? 67 : (tone == 1 ? 69 : 72));
+            if (veh_kind == VEH_SEDAN)   return (uint8_t)(tone == 0 ? 35 : (tone == 1 ? 37 : 40));
+            if (veh_kind == VEH_PICKUP)  return (uint8_t)(tone == 0 ? 50 : (tone == 1 ? 52 : 55));
+            return (uint8_t)(tone == 0 ? 18 : (tone == 1 ? 20 : 23));
+        case 2:
+            if (veh_kind == VEH_CRUISER) return (uint8_t)(tone == 0 ? 1 : (tone == 1 ? 3 : 5));
+            return (uint8_t)(tone == 0 ? 96 : (tone == 1 ? 98 : 101));
+        case 3:  return (uint8_t)(tone == 0 ? 81 : (tone == 1 ? 83 : 86));
+        case 4:  return (uint8_t)(tone == 0 ? 11 : (tone == 1 ? 12 : 13));
+        case 5:  return (uint8_t)(tone == 0 ? 2  : (tone == 1 ? 4  : 6));
+        case 6:  return 96;
+        case 7:  return (uint8_t)(tone == 2 ? 35 : 33);
+        case 8:  return (uint8_t)(tone == 2 ? 67 : 65);
+        case 9:  return (uint8_t)(tone == 0 ? 9  : (tone == 1 ? 11 : 12));
+        case 10: return 97;
+        default: return 8;
+    }
+}
+
+static int valid_veh_canvas_pt(int cx, int cy, int along_y) {
+    if ((unsigned)cx >= 48 || (unsigned)cy >= 48) return 0;
+    if (!along_y) return (cx <= 31 && cy <= 39) || (cx >= 16 && cy >= 8);
+    return (cx >= 16 && cy <= 39) || (cx <= 31 && cy >= 8);
+}
+
+static void build_two_tile_vehicle(int back_id, int front_id, int veh_kind, int along_y) {
+    static uint8_t m[32][16][20];
+    uint8_t canv[48][48];
+    uint8_t is_shad[48][48];
+    uint8_t add_out[48][48];
+    int u, v, z, s, cx, cy;
+
+    memset(m, 0, sizeof(m));
+    memset(canv, COL_TRANS, sizeof(canv));
+    memset(is_shad, 0, sizeof(is_shad));
+    memset(add_out, 0, sizeof(add_out));
+
+    if (veh_kind == VEH_CRUISER || veh_kind == VEH_SEDAN) {
+        int is_pol = (veh_kind == VEH_CRUISER);
+        int a;
+        for (u = 2; u <= 29; u++) {
+            int top_z = (u == 2) ? 6 : (u <= 26) ? 7 : (u <= 28) ? 6 : 5;
+            for (v = 3; v <= 12; v++) {
+                for (z = 2; z <= top_z; z++) {
+                    m[u][v][z] = (uint8_t)((is_pol && u >= 11 && u <= 18) ? 2 : 1);
+                }
+            }
+        }
+        if (!is_pol) {
+            for (u = 4; u <= 27; u++) { m[u][3][3] = 9; m[u][12][3] = 9; }
+        } else {
+            m[14][3][5] = 10; m[15][3][5] = 10;
+            m[14][12][5] = 10; m[15][12][5] = 10;
+        }
+        for (v = 3; v <= 12; v++) {
+            m[2][v][2] = 5; m[29][v][2] = 5;
+            if (v >= 6 && v <= 9) { m[29][v][3] = 9; m[29][v][4] = 9; }
+        }
+        for (v = 4; v <= 5; v++) {
+            m[29][v][4] = 6; m[29][15 - v][4] = 6;
+            m[2][v][4]  = 7; m[2][15 - v][4]  = 7;
+        }
+        m[29][3][4] = 10; m[29][12][4] = 10;
+
+        for (u = 8; u <= 20; u++) {
+            int max_z = (u == 8) ? 9 : (u == 9) ? 11 :
+                        (u <= 17) ? 12 : (u == 18) ? 11 : (u == 19) ? 10 : 8;
+            for (v = 4; v <= 11; v++) {
+                for (z = 8; z <= max_z; z++) {
+                    int roof_cap = (z == 12 && u >= 10 && u <= 17);
+                    int f_glass  = (u >= 18 && v >= 5 && v <= 10);
+                    int r_glass  = (u <= 9  && v >= 5 && v <= 10);
+                    int s_glass  = ((v == 4 || v == 11) && u >= 10 && u <= 17 && u != 14 && z <= 11);
+                    if (roof_cap) m[u][v][z] = (uint8_t)(is_pol ? 2 : 1);
+                    else if (f_glass || r_glass || s_glass) m[u][v][z] = 3;
+                    else m[u][v][z] = (uint8_t)(is_pol ? 2 : 1);
+                }
+            }
+        }
+        if (is_pol) {
+            for (u = 13; u <= 15; u++)
+                for (v = 4; v <= 11; v++)
+                    m[u][v][13] = (uint8_t)((v <= 6) ? 7 : (v <= 8 ? 5 : 8));
+        } else {
+            for (u = 13; u <= 16; u++)
+                for (v = 6; v <= 9; v++)
+                    m[u][v][12] = 9;
+        }
+        for (a = 0; a < 2; a++) {
+            int au = a ? 21 : 5;
+            for (u = au; u <= au + 5; u++)
+                for (z = 2; z <= 5; z++) { m[u][3][z] = 9; m[u][12][z] = 9; }
+            for (u = au + 1; u <= au + 4; u++) {
+                for (z = 0; z <= 4; z++) {
+                    uint8_t wmat;
+                    if ((u == au + 1 || u == au + 4) && (z == 0 || z == 4)) continue;
+                    wmat = (uint8_t)((u >= au + 2 && u <= au + 3 && z >= 1 && z <= 2) ? 5 : 4);
+                    m[u][2][z] = wmat; m[u][3][z] = wmat;
+                    m[u][13][z] = wmat; m[u][12][z] = wmat;
+                }
+            }
+        }
+    } else if (veh_kind == VEH_PICKUP) {
+        int a;
+        for (u = 2; u <= 13; u++) {
+            for (v = 3; v <= 12; v++) {
+                for (z = 2; z <= 8; z++) {
+                    int bwall = (u == 2 || v == 3 || v == 12);
+                    if (z <= 4) m[u][v][z] = (uint8_t)(bwall ? 1 : 9);
+                    else if (bwall) m[u][v][z] = 1;
+                }
+            }
+        }
+        for (v = 3; v <= 12; v++)
+            for (z = 9; z <= 12; z++)
+                if (v <= 4 || v >= 11 || z == 12) m[13][v][z] = 9;
+        for (u = 14; u <= 21; u++) {
+            int max_z = (u == 21) ? 10 : 13;
+            for (v = 3; v <= 12; v++) {
+                for (z = 2; z <= max_z; z++) {
+                    if (z <= 8) m[u][v][z] = 1;
+                    else if (v >= 4 && v <= 11) {
+                        int roof = (z == 13 && u <= 19);
+                        int ws   = (u >= 20 && v >= 5 && v <= 10);
+                        int sw   = ((v == 4 || v == 11) && u >= 15 && u <= 19 && z <= 12);
+                        m[u][v][z] = (uint8_t)(roof ? 1 : ((ws || sw) ? 3 : 1));
+                    }
+                }
+            }
+        }
+        for (u = 21; u <= 29; u++) {
+            int top_z = (u >= 28) ? 7 : 8;
+            for (v = 3; v <= 12; v++)
+                for (z = 2; z <= top_z; z++)
+                    if (m[u][v][z] == 0) m[u][v][z] = 1;
+        }
+        for (v = 3; v <= 12; v++) {
+            m[2][v][2] = 5; m[29][v][2] = 5;
+            if (v >= 5 && v <= 10) { m[29][v][4] = 5; m[29][v][5] = 9; m[29][v][6] = 5; }
+        }
+        for (v = 3; v <= 4; v++) {
+            m[29][v][5] = 6; m[29][15 - v][5] = 6;
+            m[2][v][5]  = 7; m[2][15 - v][5]  = 7;
+            m[2][v][6]  = 7; m[2][15 - v][6]  = 7;
+        }
+        for (a = 0; a < 2; a++) {
+            int au = a ? 21 : 5;
+            for (u = au; u <= au + 5; u++)
+                for (z = 2; z <= 5; z++) { m[u][3][z] = 9; m[u][12][z] = 9; }
+            for (u = au + 1; u <= au + 4; u++) {
+                for (z = 0; z <= 5; z++) {
+                    uint8_t wmat;
+                    if ((u == au + 1 || u == au + 4) && (z == 0 || z == 5)) continue;
+                    wmat = (uint8_t)((u >= au + 2 && u <= au + 3 && z >= 2 && z <= 3) ? 5 : 4);
+                    m[u][2][z] = wmat; m[u][3][z] = wmat;
+                    m[u][13][z] = wmat; m[u][12][z] = wmat;
+                }
+            }
+        }
+    } else {
+        for (v = 6; v <= 9; v++) { m[2][v][4] = 9; m[3][v][4] = 9; }
+        for (u = 4; u <= 13; u++)
+            for (v = 4; v <= 11; v++)
+                for (z = 4; z <= 8; z++) m[u][v][z] = 1;
+        for (u = 4; u <= 12; u++) {
+            for (v = 2; v <= 4; v++) { m[u][v][9] = 1; m[u][15 - v][9] = 1; }
+            if (u >= 5 && u <= 11)
+                for (v = 2; v <= 4; v++) { m[u][v][10] = 1; m[u][15 - v][10] = 1; }
+        }
+        for (u = 6; u <= 9; u++)
+            for (v = 6; v <= 9; v++)
+                for (z = 9; z <= (u <= 7 ? 12 : 10); z++) m[u][v][z] = 9;
+        for (z = 9; z <= 12; z++) { m[11][7][z] = 9; m[11][8][z] = 9; }
+        for (z = 9; z <= 15; z++) {
+            m[5][4][z] = 2; m[5][11][z] = 2;
+            m[12][4][z] = 2; m[12][11][z] = 2;
+        }
+        for (u = 5; u <= 12; u++)
+            for (v = 4; v <= 11; v++) m[u][v][16] = 1;
+        for (u = 13; u <= 28; u++) {
+            int top_z = (u == 28) ? 10 : 11;
+            for (v = 5; v <= 10; v++) {
+                for (z = 5; z <= top_z; z++) {
+                    int stripe = (z == 9 && (v == 5 || v == 10) && u >= 14 && u <= 27);
+                    int louver = (z >= 7 && z <= 8 && (v == 5 || v == 10) &&
+                                  (u == 18 || u == 20 || u == 22 || u == 24));
+                    m[u][v][z] = (uint8_t)(stripe ? 2 : (louver ? 9 : 1));
+                }
+            }
+        }
+        for (v = 6; v <= 9; v++)
+            for (z = 6; z <= 9; z++) m[28][v][z] = 9;
+        m[28][5][9] = 6;  m[28][10][9] = 6;
+        m[28][5][10] = 6; m[28][10][10] = 6;
+        for (z = 11; z <= 17; z++) {
+            m[22][6][z] = 9;
+            if (z >= 13 && z <= 15) m[23][6][z] = 9;
+        }
+        for (u = 25; u <= 26; u++)
+            for (v = 4; v <= 11; v++) m[u][v][3] = 9;
+        for (u = 3; u <= 11; u++) {
+            for (z = 0; z <= 8; z++) {
+                int d2 = (u - 7) * (u - 7) + (z - 4) * (z - 4);
+                uint8_t wmat;
+                if (d2 > 20) continue;
+                wmat = (uint8_t)((d2 <= 5) ? 2 : 4);
+                for (v = 2; v <= 3; v++) { m[u][v][z] = wmat; m[u][15 - v][z] = wmat; }
+            }
+        }
+        for (u = 23; u <= 28; u++) {
+            for (z = 0; z <= 5; z++) {
+                int du2 = u * 2 - 51, dz2 = z * 2 - 5;
+                int d2 = du2 * du2 + dz2 * dz2;
+                uint8_t wmat;
+                if (d2 > 34) continue;
+                wmat = (uint8_t)((d2 <= 8) ? 2 : 4);
+                for (v = 3; v <= 4; v++) { m[u][v][z] = wmat; m[u][15 - v][z] = wmat; }
+            }
+        }
+    }
+
+    for (u = 3; u <= 28; u++) {
+        for (v = 3; v <= 12; v++) {
+            cx = !along_y ? (16 + u - v) : (31 - u + v);
+            cy = 24 + ((u + v) >> 1);
+            if (valid_veh_canvas_pt(cx, cy, along_y)) {
+                canv[cy][cx] = 14;
+                is_shad[cy][cx] = 1;
+            }
+        }
+    }
+
+    for (s = 0; s <= 46; s++) {
+        int u_min = (s > 15) ? (s - 15) : 0;
+        int u_max = (s < 31) ? s : 31;
+        for (u = u_min; u <= u_max; u++) {
+            v = s - u;
+            for (z = 0; z < 20; z++) {
+                uint8_t mat = m[u][v][z];
+                int top_o, v_o, u_o, left_o, right_o, tone;
+                uint8_t col;
+                if (!mat) continue;
+                top_o = (z + 1 >= 20 || m[u][v][z + 1] == 0);
+                v_o   = (v + 1 >= 16 || m[u][v + 1][z] == 0);
+                u_o   = (u + 1 >= 32 || m[u + 1][v][z] == 0);
+                if (!top_o && !v_o && !u_o) continue;
+                left_o  = !along_y ? v_o : u_o;
+                right_o = !along_y ? u_o : v_o;
+                tone = top_o ? 0 : (left_o && !right_o) ? 1 : (right_o && !left_o) ? 2 : 1;
+                col = shade_vehicle_mat(veh_kind, mat, tone);
+                if (mat == 3 && ((u + v + z) % 5 == 0)) col = 80;
+                cx = !along_y ? (16 + u - v) : (31 - u + v);
+                cy = 24 + ((u + v) >> 1) - z;
+                if (valid_veh_canvas_pt(cx, cy, along_y)) {
+                    canv[cy][cx] = col;
+                    is_shad[cy][cx] = 0;
+                }
+            }
+        }
+    }
+
+    for (cy = 0; cy < 48; cy++) {
+        for (cx = 0; cx < 48; cx++) {
+            static const int odx[4] = { -1, 1, 0, 0 };
+            static const int ody[4] = {  0, 0, -1, 1 };
+            int d;
+            if (canv[cy][cx] != COL_TRANS || !valid_veh_canvas_pt(cx, cy, along_y)) continue;
+            for (d = 0; d < 4; d++) {
+                int nx = cx + odx[d], ny = cy + ody[d];
+                if ((unsigned)nx < 48 && (unsigned)ny < 48 &&
+                    canv[ny][nx] != COL_TRANS && !is_shad[ny][nx]) {
+                    add_out[cy][cx] = 1;
+                    break;
+                }
+            }
+        }
+    }
+    for (cy = 0; cy < 48; cy++) {
+        for (cx = 0; cx < 48; cx++) {
+            if (add_out[cy][cx]) canv[cy][cx] = 14;
+        }
+    }
+
+    for (cy = 0; cy < 48; cy++) {
+        for (cx = 0; cx < 48; cx++) {
+            if (canv[cy][cx] == COL_TRANS) continue;
+            if (!along_y) {
+                if (cx < 16 || cy < 8 || (cx < 24 && cy <= 39)) {
+                    spr_objects[back_id][cy * OBJ_W + cx] = canv[cy][cx];
+                } else {
+                    spr_objects[front_id][(cy - 8) * OBJ_W + (cx - 16)] = canv[cy][cx];
+                }
+            } else {
+                if (cx >= 32 || cy < 8 || (cx >= 24 && cy <= 39)) {
+                    spr_objects[back_id][cy * OBJ_W + (cx - 16)] = canv[cy][cx];
+                } else {
+                    spr_objects[front_id][(cy - 8) * OBJ_W + cx] = canv[cy][cx];
+                }
             }
         }
     }
@@ -333,13 +718,9 @@ static void build_objects(void) {
     obj_rect(OBJ_STREETLAMP, 15,  5, 7, 2, 5);    /* Overhang arm */
     obj_rect(OBJ_STREETLAMP, 20,  6, 4, 3, 96);   /* Bright sodium vapor lamp head */
 
-    /* 6. OBJ_CAR_HOOD: Parked Police Cruiser / Sedan */
-    obj_rect(OBJ_CAR_HOOD, 4, 20, 24, 12, 68);    /* Dark blue body */
-    obj_rect(OBJ_CAR_HOOD, 8, 15, 16,  6, 82);    /* Windshield glass */
-    obj_rect(OBJ_CAR_HOOD, 13, 13, 3,  2, 32);    /* Red roof lightbar */
-    obj_rect(OBJ_CAR_HOOD, 16, 13, 3,  2, 64);    /* Blue roof lightbar */
-    obj_rect(OBJ_CAR_HOOD, 6, 29,  5,  5, 13);    /* Front tire */
-    obj_rect(OBJ_CAR_HOOD, 21, 29, 5,  5, 13);    /* Rear tire */
+    /* 6 & 14..16: Full 2-Tile Coopersburg Police Cruiser (+X & +Y) */
+    build_two_tile_vehicle(OBJ_CAR_BACK_X, OBJ_CAR_FRONT_X, VEH_CRUISER, 0);
+    build_two_tile_vehicle(OBJ_CAR_BACK_Y, OBJ_CAR_FRONT_Y, VEH_CRUISER, 1);
 
     /* 7. OBJ_UFO_CORE: Alien Scout Elerium-115 Power Source */
     obj_rect(OBJ_UFO_CORE, 8, 22, 16, 12, 165);   /* Alien alloy base */
@@ -377,14 +758,93 @@ static void build_objects(void) {
     obj_rect(OBJ_BARREL, 10, 23, 12,  3, 96); /* Yellow hazard band */
     obj_rect(OBJ_BARREL, 14, 24,  4,  2, 15); /* Hazard diamond symbol */
 
-    /* 13. OBJ_TRACTOR: Classic Green/Yellow PA Farm Tractor */
-    obj_rect(OBJ_TRACTOR,  5, 19, 20,  9, 18); /* John-Deere style green body */
-    obj_rect(OBJ_TRACTOR,  6, 13, 10,  6, 20); /* Cab frame */
-    obj_rect(OBJ_TRACTOR, 19, 13,  2,  6, 12); /* Exhaust stack */
-    obj_rect(OBJ_TRACTOR,  5, 23,  8,  9, 13); /* Huge rear tire */
-    obj_rect(OBJ_TRACTOR,  7, 25,  4,  5, 96); /* Yellow rear wheel hub */
-    obj_rect(OBJ_TRACTOR, 19, 26,  6,  6, 13); /* Front tire */
-    obj_rect(OBJ_TRACTOR, 21, 28,  2,  2, 96); /* Yellow front hub */
+    /* 13 & 17..19: Full 2-Tile Pennsylvania Farm Tractor (+X & +Y) */
+    build_two_tile_vehicle(OBJ_TRACTOR_BACK_X, OBJ_TRACTOR_FRONT_X, VEH_TRACTOR, 0);
+    build_two_tile_vehicle(OBJ_TRACTOR_BACK_Y, OBJ_TRACTOR_FRONT_Y, VEH_TRACTOR, 1);
+
+    /* 20..23: Full 2-Tile 90s Civilian Sedan (+X & +Y) */
+    build_two_tile_vehicle(OBJ_SEDAN_BACK_X, OBJ_SEDAN_FRONT_X, VEH_SEDAN, 0);
+    build_two_tile_vehicle(OBJ_SEDAN_BACK_Y, OBJ_SEDAN_FRONT_Y, VEH_SEDAN, 1);
+
+    /* 24..27: Full 2-Tile Utility / Farm Pickup Truck (+X & +Y) */
+    build_two_tile_vehicle(OBJ_PICKUP_BACK_X, OBJ_PICKUP_FRONT_X, VEH_PICKUP, 0);
+    build_two_tile_vehicle(OBJ_PICKUP_BACK_Y, OBJ_PICKUP_FRONT_Y, VEH_PICKUP, 1);
+
+    /* 28..31: 3D Curved Alien Saucer Hull Corner Fairings (N, E, S, W) */
+    for (i = 0; i < 4; i++) {
+        int slot = OBJ_UFO_CORNER_N + i;
+        int pu2 = (i == 0 || i == 3) ? 30 : 0;
+        int pv2 = (i == 0 || i == 1) ? 30 : 0;
+        int s, su, z;
+        for (y = 0; y < TILE_H; y++) {
+            for (x = 0; x < TILE_W; x++) {
+                int uf2, vf2, d2;
+                if (!in_diamond(x, y)) continue;
+                uf2 = x + 2 * y - 15;
+                vf2 = 2 * y - x + 16;
+                d2  = (uf2 - pu2) * (uf2 - pu2) + (vf2 - pv2) * (vf2 - pv2);
+                if (d2 <= 810) {
+                    spr_objects[slot][(24 + y) * OBJ_W + x] = spr_floors[FLOOR_UFO_DECK][y * TILE_W + x];
+                }
+            }
+        }
+        for (s = 0; s <= 62; s++) {
+            int su_min = (s > 31) ? (s - 31) : 0;
+            int su_max = (s < 31) ? s : 31;
+            for (su = su_min; su <= su_max; su++) {
+                int sv = s - su;
+                int du = abs(su - pu2), dv = abs(sv - pv2);
+                int r2 = du * du + dv * dv;
+                int cx = (31 + su - sv) >> 1;
+                if (r2 < 520 || r2 > 950) continue;
+                for (z = 0; z < 24; z++) {
+                    int cy = 23 + ((su + sv) >> 2) - z;
+                    uint8_t col;
+                    if ((unsigned)cx >= OBJ_W || (unsigned)cy >= OBJ_H) continue;
+                    if (z == 23)      col = (r2 >= 760) ? 162 : 81;
+                    else if (z == 12) col = ((su + sv) % 6 == 0) ? 144 : 81;
+                    else if (z >= 14) col = (uint8_t)((du >= dv ? 162 : 165) + (23 - z) / 3);
+                    else              col = (uint8_t)((du >= dv ? 132 : 135) + (11 - z) / 2);
+                    spr_objects[slot][cy * OBJ_W + cx] = col;
+                }
+            }
+        }
+    }
+
+    /* 32. OBJ_UFO_NAV: Alien Navigation Console + Floating 3D Hologram */
+    obj_rect(OBJ_UFO_NAV, 6,  24, 20, 11, 134);
+    obj_rect(OBJ_UFO_NAV, 7,  23, 18,  4, 83);
+    obj_rect(OBJ_UFO_NAV, 6,  30, 20,  1, 81);
+    obj_rect(OBJ_UFO_NAV, 11, 11, 10,  9, 82);
+    obj_rect(OBJ_UFO_NAV, 9,  15, 14,  2, 80);
+    obj_rect(OBJ_UFO_NAV, 15, 14,  2,  2, 96);
+
+    /* 33. OBJ_UFO_COMPUTER: Alien Hyper-Wave Flight Computer Spire */
+    obj_rect(OBJ_UFO_COMPUTER, 8,  9, 16, 26, 134);
+    obj_rect(OBJ_UFO_COMPUTER, 9,  9, 14,  2, 162);
+    obj_rect(OBJ_UFO_COMPUTER, 11, 13, 3, 16, 81);
+    obj_rect(OBJ_UFO_COMPUTER, 18, 13, 3, 16, 210);
+    obj_rect(OBJ_UFO_COMPUTER, 15, 15, 2, 12, 144);
+
+    /* 34. OBJ_UFO_CRYO: Alien Cryo-Stasis Bio-Chamber */
+    obj_rect(OBJ_UFO_CRYO, 9,   8, 14, 27, 83);
+    obj_rect(OBJ_UFO_CRYO, 9,   8, 14,  4, 133);
+    obj_rect(OBJ_UFO_CRYO, 9,  30, 14,  5, 135);
+    obj_rect(OBJ_UFO_CRYO, 14, 15,  4, 10, 91);
+    obj_rect(OBJ_UFO_CRYO, 11, 12,  1, 17, 80);
+
+    /* 35. OBJ_UFO_POD: Alien Artifact / Ordnance Containment Pod */
+    obj_rect(OBJ_UFO_POD, 8,  20, 16, 15, 134);
+    obj_rect(OBJ_UFO_POD, 12, 20,  8,  3, 144);
+    obj_rect(OBJ_UFO_POD, 8,  27, 16,  2, 81);
+    obj_rect(OBJ_UFO_POD, 14, 27,  4,  2, 113);
+
+    /* 36. OBJ_UFO_GRAVLIFT: Alien Anti-Gravity Lift Pad + Energy Rings */
+    obj_rect(OBJ_UFO_GRAVLIFT, 6, 28, 20, 7, 134);
+    obj_rect(OBJ_UFO_GRAVLIFT, 9, 29, 14, 5, 81);
+    obj_rect(OBJ_UFO_GRAVLIFT, 8, 21, 16, 1, 80);
+    obj_rect(OBJ_UFO_GRAVLIFT, 9, 14, 14, 1, 129);
+    obj_rect(OBJ_UFO_GRAVLIFT, 10, 8, 12, 1, 80);
 }
 
 /* Build 8-directional sprites for DUFF-COM Soldiers, Sectoids, Floaters, and Mutons */
@@ -973,8 +1433,10 @@ static void load_bmp_overrides(void) {
     }
 
     sheet = bmp_load_alloc("HIDDEN.BMP", &sw, &sh);
-    if (sheet && sw == 232 && sh == 92) {
+    if (sheet && sw > 0 && sw <= SCREEN_W && sh > 0 && sh <= SCREEN_H) {
         gfx_hidden_bg = sheet;
+        gfx_hidden_w  = sw;
+        gfx_hidden_h  = sh;
     } else if (sheet) {
         free(sheet);
     }

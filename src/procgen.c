@@ -2,6 +2,7 @@
 #include "isomap.h"
 #include "gfx_assets.h"
 #include "pathfind.h"
+#include "campaign.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,12 +22,18 @@ typedef struct {
     int stories;
 } BldgRect;
 
+#define MAX_PROC_BLDGS 12
+#define LOT_MAX_X      (MAP_W - 3)
+#define LOT_MAX_Y      (MAP_H - 3)
+
 static uint8_t zone_map[MAP_H][MAP_W];
 static uint8_t reach_mask[MAP_LEVS][MAP_H][MAP_W];
 
-static BldgRect g_bldgs[6];
+static BldgRect g_bldgs[MAX_PROC_BLDGS];
 static int      g_num_bldgs = 0;
 static BldgRect g_ufo_rect;
+static int      g_ufo_sz = 5;
+static int      g_ufo_door_side = 2;
 static int      g_lz_x0, g_lz_y0, g_lz_x1, g_lz_y1, g_lz_side;
 
 static int rrange(int lo, int hi) {
@@ -70,17 +77,17 @@ static void reserve_lz(void) {
     int x, y;
     g_lz_side = rand() % 4;
     if (g_lz_side == 0) {        /* South Edge */
-        g_lz_x0 = rrange(4, 15); g_lz_x1 = g_lz_x0 + 4;
-        g_lz_y0 = 19;            g_lz_y1 = 21;
+        g_lz_x0 = rrange(4, MAP_W - 9); g_lz_x1 = g_lz_x0 + 4;
+        g_lz_y0 = MAP_H - 5;            g_lz_y1 = MAP_H - 3;
     } else if (g_lz_side == 1) { /* North Edge */
-        g_lz_x0 = rrange(4, 15); g_lz_x1 = g_lz_x0 + 4;
-        g_lz_y0 = 2;             g_lz_y1 = 4;
+        g_lz_x0 = rrange(4, MAP_W - 9); g_lz_x1 = g_lz_x0 + 4;
+        g_lz_y0 = 2;                    g_lz_y1 = 4;
     } else if (g_lz_side == 2) { /* West Edge */
-        g_lz_x0 = 2;             g_lz_x1 = 4;
-        g_lz_y0 = rrange(4, 15); g_lz_y1 = g_lz_y0 + 4;
+        g_lz_x0 = 2;                    g_lz_x1 = 4;
+        g_lz_y0 = rrange(4, MAP_H - 9); g_lz_y1 = g_lz_y0 + 4;
     } else {                     /* East Edge */
-        g_lz_x0 = 19;            g_lz_x1 = 21;
-        g_lz_y0 = rrange(4, 15); g_lz_y1 = g_lz_y0 + 4;
+        g_lz_x0 = MAP_W - 5;            g_lz_x1 = MAP_W - 3;
+        g_lz_y0 = rrange(4, MAP_H - 9); g_lz_y1 = g_lz_y0 + 4;
     }
 
     for (y = g_lz_y0; y <= g_lz_y1; y++) {
@@ -114,8 +121,9 @@ static int lot_available(int x0, int y0, int x1, int y1, int allow_road_overlap)
 
 static void mark_threshold_clear(int x, int y) {
     if ((unsigned)x < MAP_W && (unsigned)y < MAP_H) {
-        if (g_map[0][y][x].obj_id != OBJ_STAIRS_UP && g_map[0][y][x].obj_id != OBJ_UFO_CORE) {
-            g_map[0][y][x].obj_id = OBJ_NONE;
+        uint8_t obj = g_map[0][y][x].obj_id;
+        if (!isomap_is_lift_obj(obj) && !isomap_is_ufo_corner_obj(obj) && obj != OBJ_UFO_CORE) {
+            isomap_clear_prop_at(0, y, x, OBJ_NONE, 0);
         }
         if (zone_map[y][x] != ZONE_LZ && zone_map[y][x] != ZONE_BLDG && zone_map[y][x] != ZONE_UFO) {
             zone_map[y][x] = ZONE_DOORWAY;
@@ -149,8 +157,9 @@ static void place_stairs_at(int z, int sx, int sy) {
     if (g_map[z][sy][sx].floor_id == FLOOR_NONE) {
         g_map[z][sy][sx].floor_id = FLOOR_WOOD;
     }
-    g_map[z][sy][sx].obj_id     = OBJ_STAIRS_UP;
-    g_map[z + 1][sy][sx].obj_id = OBJ_NONE;
+    isomap_clear_prop_at(z, sy, sx, OBJ_NONE, 0);
+    isomap_clear_prop_at(z + 1, sy, sx, OBJ_NONE, 0);
+    g_map[z][sy][sx].obj_id = OBJ_STAIRS_UP;
     if (g_map[z + 1][sy][sx].floor_id == FLOOR_NONE) {
         g_map[z + 1][sy][sx].floor_id = FLOOR_WOOD;
     }
@@ -160,19 +169,71 @@ static void place_stairs_safe(int sx, int sy) {
     place_stairs_at(0, sx, sy);
 }
 
+static int prop_tile_clear(int x, int y, int z) {
+    if ((unsigned)x >= MAP_W || (unsigned)y >= MAP_H || (unsigned)z >= MAP_LEVS) return 0;
+    if (z == 0 && (zone_map[y][x] == ZONE_DOORWAY || zone_map[y][x] == ZONE_LZ)) return 0;
+    if (g_map[z][y][x].floor_id == FLOOR_NONE) return 0;
+    if (g_map[z][y][x].obj_id != OBJ_NONE) return 0;
+    /* Never block top landing of a staircase or UFO grav-lift from the level below! */
+    if (z > 0 && isomap_is_lift_obj(g_map[z - 1][y][x].obj_id)) return 0;
+    /* Never block adjacent doorways or alien airlocks on any story */
+    if (isomap_is_door_closed(g_map[z][y][x].wall_west) || isomap_is_door_open(g_map[z][y][x].wall_west)) return 0;
+    if (isomap_is_door_closed(g_map[z][y][x].wall_north) || isomap_is_door_open(g_map[z][y][x].wall_north)) return 0;
+    if (x + 1 < MAP_W && (isomap_is_door_closed(g_map[z][y][x + 1].wall_west) || isomap_is_door_open(g_map[z][y][x + 1].wall_west))) return 0;
+    if (y + 1 < MAP_H && (isomap_is_door_closed(g_map[z][y + 1][x].wall_north) || isomap_is_door_open(g_map[z][y + 1][x].wall_north))) return 0;
+    return 1;
+}
+
 static void place_prop_if_clear(int x, int y, int z, uint8_t obj_id) {
-    if ((unsigned)x >= MAP_W || (unsigned)y >= MAP_H || (unsigned)z >= MAP_LEVS) return;
-    if (z == 0 && (zone_map[y][x] == ZONE_DOORWAY || zone_map[y][x] == ZONE_LZ)) return;
-    if (g_map[z][y][x].floor_id == FLOOR_NONE) return;
-    if (g_map[z][y][x].obj_id != OBJ_NONE) return;
-    /* Never block top landing of a staircase from the level below! */
-    if (z > 0 && g_map[z - 1][y][x].obj_id == OBJ_STAIRS_UP) return;
-    /* Never block adjacent doorways on any story */
-    if (g_map[z][y][x].wall_west == WALL_DOOR_CLOSED || g_map[z][y][x].wall_west == WALL_DOOR_OPEN) return;
-    if (g_map[z][y][x].wall_north == WALL_DOOR_CLOSED || g_map[z][y][x].wall_north == WALL_DOOR_OPEN) return;
-    if (x + 1 < MAP_W && (g_map[z][y][x + 1].wall_west == WALL_DOOR_CLOSED || g_map[z][y][x + 1].wall_west == WALL_DOOR_OPEN)) return;
-    if (y + 1 < MAP_H && (g_map[z][y + 1][x].wall_north == WALL_DOOR_CLOSED || g_map[z][y + 1][x].wall_north == WALL_DOOR_OPEN)) return;
+    if (!prop_tile_clear(x, y, z)) return;
     g_map[z][y][x].obj_id = obj_id;
+}
+
+/* Place a 2-tile vehicle (2x1 along +X when along_y==0, or 1x2 along +Y when along_y==1) */
+static int place_vehicle_if_clear(int x, int y, int z, int along_y, int veh_kind) {
+    int x2 = along_y ? x : (x + 1);
+    int y2 = along_y ? (y + 1) : y;
+    int bx = along_y ? x : (x - 1);
+    int by = along_y ? (y - 1) : y;
+    int fx = along_y ? x2 : (x2 + 1);
+    int fy = along_y ? (y2 + 1) : y2;
+    uint8_t obj_back, obj_front;
+
+    if (!prop_tile_clear(x, y, z) || !prop_tile_clear(x2, y2, z)) return 0;
+    if (z == 0 && zone_map[y][x] != zone_map[y2][x2]) return 0;
+
+    /* Never allow a 2-tile vehicle to straddle a wall or fence edge */
+    if (!along_y && g_map[z][y][x2].wall_west != WALL_NONE) return 0;
+    if (along_y  && g_map[z][y2][x].wall_north != WALL_NONE) return 0;
+
+    /* Leave at least a 1-tile walking gap ahead/behind other parked vehicles */
+    if ((unsigned)bx < MAP_W && (unsigned)by < MAP_H &&
+        isomap_is_vehicle_obj(g_map[z][by][bx].obj_id)) return 0;
+    if ((unsigned)fx < MAP_W && (unsigned)fy < MAP_H &&
+        isomap_is_vehicle_obj(g_map[z][fy][fx].obj_id)) return 0;
+
+    switch (veh_kind) {
+        case VEH_SEDAN:
+            obj_back  = along_y ? OBJ_SEDAN_BACK_Y   : OBJ_SEDAN_BACK_X;
+            obj_front = along_y ? OBJ_SEDAN_FRONT_Y  : OBJ_SEDAN_FRONT_X;
+            break;
+        case VEH_PICKUP:
+            obj_back  = along_y ? OBJ_PICKUP_BACK_Y  : OBJ_PICKUP_BACK_X;
+            obj_front = along_y ? OBJ_PICKUP_FRONT_Y : OBJ_PICKUP_FRONT_X;
+            break;
+        case VEH_TRACTOR:
+            obj_back  = along_y ? OBJ_TRACTOR_BACK_Y  : OBJ_TRACTOR_BACK_X;
+            obj_front = along_y ? OBJ_TRACTOR_FRONT_Y : OBJ_TRACTOR_FRONT_X;
+            break;
+        default: /* VEH_CRUISER */
+            obj_back  = along_y ? OBJ_CAR_BACK_Y  : OBJ_CAR_BACK_X;
+            obj_front = along_y ? OBJ_CAR_FRONT_Y : OBJ_CAR_FRONT_X;
+            break;
+    }
+
+    g_map[z][y][x].obj_id   = obj_back;
+    g_map[z][y2][x2].obj_id = obj_front;
+    return 1;
 }
 
 /* Construct a watertight 1- or 2-story rectangular structure */
@@ -187,7 +248,7 @@ static BldgRect build_structure(int x0, int y0, int x1, int y1, int stories,
     for (y = y0; y <= y1; y++) {
         for (x = x0; x <= x1; x++) {
             zone_map[y][x] = ZONE_BLDG;
-            g_map[0][y][x].obj_id   = OBJ_NONE;
+            isomap_clear_prop_at(0, y, x, OBJ_NONE, 0);
             g_map[0][y][x].floor_id = floor0;
             if (stories == 1) {
                 g_map[1][y][x].floor_id = FLOOR_ROOF_TAR;
@@ -216,7 +277,7 @@ static BldgRect build_structure(int x0, int y0, int x1, int y1, int stories,
         for (x = x0; x <= x1; x++) g_map[1][y0][x].wall_north = WALL_FENCE;
     }
 
-    if (g_num_bldgs < 6) {
+    if (g_num_bldgs < MAX_PROC_BLDGS) {
         g_bldgs[g_num_bldgs++] = b;
     }
     return b;
@@ -227,7 +288,7 @@ static int find_random_lot(int w, int h, int min_x, int max_x, int min_y, int ma
                            int allow_road, int *out_x0, int *out_y0) {
     int attempt;
     if (max_x - w + 1 < min_x || max_y - h + 1 < min_y) return 0;
-    for (attempt = 0; attempt < 90; attempt++) {
+    for (attempt = 0; attempt < 140; attempt++) {
         int x0 = rrange(min_x, max_x - w + 1);
         int y0 = rrange(min_y, max_y - h + 1);
         if (lot_available(x0, y0, x0 + w - 1, y0 + h - 1, allow_road)) {
@@ -247,99 +308,241 @@ static int find_lot_flex(int *io_w, int *io_h, int min_x, int max_x, int min_y, 
     }
     *io_w = 5;
     *io_h = 5;
-    return find_random_lot(5, 5, 2, 21, 2, 21, 0, out_x0, out_y0);
+    return find_random_lot(5, 5, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, out_x0, out_y0);
 }
 
-/* Place Crashed or Landed UFO (4x4 Scout or 5x5 Cruiser, intact or crash-breached!) */
+/* Map canonical UFO coordinates (rx, ry in 0..sz-1; ry=0 Forward Bridge, ry=sz-1 Aft Airlock) to world (wx, wy) */
+static void ufo_rot_xy(int ux, int uy, int sz, int door_side, int rx, int ry, int *wx, int *wy) {
+    if (door_side == 2) {        /* South Airlock */
+        *wx = ux + rx;
+        *wy = uy + ry;
+    } else if (door_side == 0) { /* North Airlock */
+        *wx = ux + (sz - 1 - rx);
+        *wy = uy + (sz - 1 - ry);
+    } else if (door_side == 1) { /* East Airlock */
+        *wx = ux + ry;
+        *wy = uy + (sz - 1 - rx);
+    } else {                     /* West Airlock */
+        *wx = ux + (sz - 1 - ry);
+        *wy = uy + rx;
+    }
+}
+
+static void place_ufo_edge_between(int x0, int y0, int x1, int y1, uint8_t wall_type) {
+    if (x1 == x0 + 1 && y1 == y0)      g_map[0][y0][x1].wall_west  = wall_type;
+    else if (x0 == x1 + 1 && y1 == y0) g_map[0][y0][x0].wall_west  = wall_type;
+    else if (y1 == y0 + 1 && x1 == x0) g_map[0][y1][x0].wall_north = wall_type;
+    else if (y0 == y1 + 1 && x1 == x0) g_map[0][y0][x0].wall_north = wall_type;
+}
+
+static void place_ufo_prop_local(int ux, int uy, int sz, int door_side, int rx, int ry, uint8_t obj_id) {
+    int wx, wy;
+    ufo_rot_xy(ux, uy, sz, door_side, rx, ry, &wx, &wy);
+    if ((unsigned)wx < MAP_W && (unsigned)wy < MAP_H && g_map[0][wy][wx].obj_id == OBJ_NONE) {
+        g_map[0][wy][wx].obj_id = obj_id;
+    }
+}
+
+/* Place Rounded Futuristic Alien Saucer (5x5 Scout or 7x7 Multi-Room Cruiser, Landed or Crashed!) */
 static void place_procedural_ufo(void) {
-    int sz = (rand() % 100 < 35) ? 4 : 5; /* 35% 4x4 Scout, 65% 5x5 Cruiser */
+    int sz = (rand() % 100 < 45) ? 5 : 7; /* 45% 5x5 Scout Saucer, 55% 7x7 Cruiser Saucer */
     int crashed = (rand() % 100 < 45);
-    int min_x = 2, max_x = 21, min_y = 2, max_y = 21;
-    int ux = 9, uy = 2;
-    int x, y, door_side;
+    int min_x = 2, max_x = LOT_MAX_X, min_y = 2, max_y = LOT_MAX_Y;
+    int ux, uy, ux1, uy1, cx, cy, x, y, door_side;
 
-    /* Bias UFO into the half of the sector opposite the DUFF-COM Drop Zone */
-    if (g_lz_side == 0)      { max_y = 9;  }
-    else if (g_lz_side == 1) { min_y = 14; }
-    else if (g_lz_side == 2) { min_x = 14; }
-    else                     { max_x = 9;  }
-
-    if (!find_random_lot(sz, sz, min_x, max_x, min_y, max_y, 1, &ux, &uy)) {
-        (void)find_random_lot(sz, sz, 2, 21, 2, 21, 1, &ux, &uy);
+    /* Sync UFO hull class & crash state with the active Lehigh Valley Radar Incident! */
+    if (g_camp.launched_event >= 0 && g_camp.launched_event < MAX_RADAR_EVENTS &&
+        g_camp.events[g_camp.launched_event].active) {
+        const RadarEvent *ev = &g_camp.events[g_camp.launched_event];
+        crashed = (ev->severity == 0);
+        if (ev->type_title && strstr(ev->type_title, "SCOUT") != NULL) {
+            sz = 5;
+        } else if ((ev->type_title && strstr(ev->type_title, "CRUISER") != NULL) ||
+                   (ev->intel_desc && strstr(ev->intel_desc, "CRUISER") != NULL) ||
+                   ev->severity == 2) {
+            sz = 7;
+        }
     }
 
+    ux = (MAP_W - sz) / 2;
+    uy = 3;
+
+    /* Bias UFO into the far sector opposite the DUFF-COM Drop Zone */
+    if (g_lz_side == 0)      { max_y = (MAP_H * 2) / 5;  }
+    else if (g_lz_side == 1) { min_y = MAP_H - 1 - (MAP_H * 2) / 5; }
+    else if (g_lz_side == 2) { min_x = MAP_W - 1 - (MAP_W * 2) / 5; }
+    else                     { max_x = (MAP_W * 2) / 5;  }
+
+    if (!find_random_lot(sz, sz, min_x, max_x, min_y, max_y, 1, &ux, &uy)) {
+        (void)find_random_lot(sz, sz, 2, LOT_MAX_X, 2, LOT_MAX_Y, 1, &ux, &uy);
+    }
+
+    ux1 = ux + sz - 1;
+    uy1 = uy + sz - 1;
+    cx  = ux + sz / 2;
+    cy  = uy + sz / 2;
+
     g_ufo_rect.valid = 1;
-    g_ufo_rect.x0 = ux; g_ufo_rect.y0 = uy;
-    g_ufo_rect.x1 = ux + sz - 1; g_ufo_rect.y1 = uy + sz - 1;
+    g_ufo_rect.x0 = ux;  g_ufo_rect.y0 = uy;
+    g_ufo_rect.x1 = ux1; g_ufo_rect.y1 = uy1;
     g_ufo_rect.stories = 1;
+    g_ufo_sz = sz;
 
     /* Optional scorched skid-furrow trailing behind a crash-landed UFO */
     if (crashed) {
-        int sx_dir = (ux + sz / 2 < 12) ? -1 : 1;
-        int sy_dir = (uy + sz / 2 < 12) ? -1 : 1;
+        int sx_dir = (cx < MAP_W / 2) ? -1 : 1;
+        int sy_dir = (cy < MAP_H / 2) ? -1 : 1;
         int k;
-        for (k = 1; k <= 4; k++) {
-            int tx = ux + (sz / 2) + sx_dir * k;
-            int ty = uy + (sz / 2) + sy_dir * (k / 2);
+        for (k = 1; k <= 6; k++) {
+            int tx = cx + sx_dir * (sz / 2 + k);
+            int ty = cy + sy_dir * ((k + 1) / 2);
             if ((unsigned)tx < MAP_W && (unsigned)ty < MAP_H && zone_map[ty][tx] != ZONE_LZ) {
                 g_map[0][ty][tx].floor_id = FLOOR_SCORCHED;
-                if (k == 1) g_map[0][ty][tx].smoke = 3;
-                if (k == 2 && (rand() & 1)) g_map[0][ty][tx].obj_id = OBJ_RUBBLE;
+                if (k == 1) g_map[0][ty][tx].smoke = (uint8_t)(2 + (rand() % 3));
+                else if (k <= 3 && (rand() & 1)) g_map[0][ty][tx].smoke = (uint8_t)(1 + (rand() & 1));
+                if (k == 2 && (rand() & 1)) isomap_clear_prop_at(0, ty, tx, OBJ_RUBBLE, 0);
             }
         }
     }
 
-    for (y = uy; y < uy + sz; y++) {
-        for (x = ux; x < ux + sz; x++) {
+    /* Build Rounded Saucer Hull: curved 3D corner fairings + glowing alien deck & domed roof */
+    for (y = uy; y <= uy1; y++) {
+        for (x = ux; x <= ux1; x++) {
+            int is_n = (x == ux  && y == uy);
+            int is_e = (x == ux1 && y == uy);
+            int is_s = (x == ux1 && y == uy1);
+            int is_w = (x == ux  && y == uy1);
+
             zone_map[y][x] = ZONE_UFO;
-            g_map[0][y][x].obj_id   = OBJ_NONE;
-            g_map[0][y][x].floor_id = FLOOR_SCORCHED;
-            g_map[1][y][x].floor_id = FLOOR_ROOF_TAR;
-            if (x == ux)          g_map[0][y][x].wall_west = WALL_STEEL;
-            if (x == ux + sz - 1) g_map[0][y][x + 1].wall_west = WALL_STEEL;
-            if (y == uy)          g_map[0][y][x].wall_north = WALL_STEEL;
-            if (y == uy + sz - 1) g_map[0][y + 1][x].wall_north = WALL_STEEL;
+            isomap_clear_prop_at(0, y, x, OBJ_NONE, 0);
+            g_map[0][y][x].wall_west  = WALL_NONE;
+            g_map[0][y][x].wall_north = WALL_NONE;
+
+            if (is_n || is_e || is_s || is_w) {
+                /* Keep outdoor ground outside curved saucer arc; cap z=1 with rounded dome rim */
+                if (crashed && ((x + y) & 1)) {
+                    g_map[0][y][x].floor_id = FLOOR_SCORCHED;
+                }
+                g_map[0][y][x].obj_id = is_n ? OBJ_UFO_CORNER_N :
+                                        is_e ? OBJ_UFO_CORNER_E :
+                                        is_s ? OBJ_UFO_CORNER_S : OBJ_UFO_CORNER_W;
+                g_map[1][y][x].floor_id = is_n ? FLOOR_UFO_ROOF_N :
+                                          is_e ? FLOOR_UFO_ROOF_E :
+                                          is_s ? FLOOR_UFO_ROOF_S : FLOOR_UFO_ROOF_W;
+            } else {
+                g_map[0][y][x].floor_id = FLOOR_UFO_DECK;
+                g_map[1][y][x].floor_id = FLOOR_UFO_ROOF;
+            }
         }
     }
 
-    /* Orient main UFO airlock door toward the center of the battlefield */
+    /* Clear exterior south/east boundary edges, then place convex saucer hull along straight spans */
+    for (x = ux; x <= ux1; x++) g_map[0][uy1 + 1][x].wall_north = WALL_NONE;
+    for (y = uy; y <= uy1; y++) g_map[0][y][ux1 + 1].wall_west  = WALL_NONE;
+
+    for (x = ux + 1; x <= ux1 - 1; x++) {
+        g_map[0][uy][x].wall_north      = WALL_UFO_HULL;
+        g_map[0][uy1 + 1][x].wall_north = WALL_UFO_HULL;
+    }
+    for (y = uy + 1; y <= uy1 - 1; y++) {
+        g_map[0][y][ux].wall_west      = WALL_UFO_HULL;
+        g_map[0][y][ux1 + 1].wall_west = WALL_UFO_HULL;
+    }
+
+    /* Orient main oval alien iris airlock toward the center of the battlefield */
     {
-        int cx = ux + sz / 2, cy = uy + sz / 2;
-        if (abs(12 - cy) >= abs(12 - cx)) {
-            door_side = (cy <= 12) ? 2 : 0;
+        int mid_x = MAP_W / 2, mid_y = MAP_H / 2;
+        if (abs(mid_y - cy) >= abs(mid_x - cx)) {
+            door_side = (cy <= mid_y) ? 2 : 0;
         } else {
-            door_side = (cx <= 12) ? 1 : 3;
+            door_side = (cx <= mid_x) ? 1 : 3;
         }
-        if (door_side == 0 || door_side == 2) {
-            carve_rect_door(ux, uy, ux + sz - 1, uy + sz - 1, door_side, ux + sz / 2, WALL_DOOR_CLOSED);
-        } else {
-            carve_rect_door(ux, uy, ux + sz - 1, uy + sz - 1, door_side, uy + sz / 2, WALL_DOOR_CLOSED);
-        }
+        g_ufo_door_side = door_side;
 
-        /* Crash-landed saucers can also have a blown-out hull breach! */
-        if (crashed) {
-            int b_side = (door_side + 1 + (rand() & 1)) & 3;
-            int b_pos  = ((b_side == 0 || b_side == 2) ? ux : uy) + 1 + (rand() % (sz - 2));
-            carve_rect_door(ux, uy, ux + sz - 1, uy + sz - 1, b_side, b_pos, WALL_NONE);
-            if (b_side == 0)      { g_map[0][uy][b_pos].obj_id = OBJ_RUBBLE; g_map[0][uy][b_pos].smoke = 3; }
-            else if (b_side == 2) { g_map[0][uy + sz - 1][b_pos].obj_id = OBJ_RUBBLE; g_map[0][uy + sz - 1][b_pos].fire = 2; }
-            else if (b_side == 3) { g_map[0][b_pos][ux].obj_id = OBJ_RUBBLE; g_map[0][b_pos][ux].smoke = 3; }
-            else                  { g_map[0][b_pos][ux + sz - 1].obj_id = OBJ_RUBBLE; g_map[0][b_pos][ux + sz - 1].fire = 2; }
+        if (door_side == 0 || door_side == 2) {
+            carve_rect_door(ux, uy, ux1, uy1, door_side, cx, WALL_UFO_DOOR_CLOSED);
+        } else {
+            carve_rect_door(ux, uy, ux1, uy1, door_side, cy, WALL_UFO_DOOR_CLOSED);
         }
     }
 
-    /* Glowing Elerium-115 Power Core inside UFO center + Hull Roof Access Ladder */
-    g_map[0][uy + sz / 2][ux + sz / 2].obj_id = OBJ_UFO_CORE;
-    place_stairs_at(0, ux, uy);
-    if (sz == 5) {
-        place_prop_if_clear(ux + 1, uy + 1, 0, OBJ_CRATE);
+    /* Furnish Alien Saucer Interior: Dedicated Navigation Area, Reactor Core, Cryo, Pods & Grav-Lift */
+    if (sz == 7) {
+        int rx;
+        /* Internal Cruiser Bulkhead + Centered Alien Airlock sealing the Navigation Bridge (ry=0..1) */
+        for (rx = 0; rx < sz; rx++) {
+            int x_fwd, y_fwd, x_aft, y_aft;
+            uint8_t bw = (rx == sz / 2) ? WALL_UFO_DOOR_CLOSED : WALL_UFO_HULL;
+            ufo_rot_xy(ux, uy, sz, door_side, rx, 1, &x_fwd, &y_fwd);
+            ufo_rot_xy(ux, uy, sz, door_side, rx, 2, &x_aft, &y_aft);
+            place_ufo_edge_between(x_fwd, y_fwd, x_aft, y_aft, bw);
+        }
+
+        /* Forward Navigation Bridge: Twin Holo Star-Maps + Alien Flight Telemetry Banks */
+        place_ufo_prop_local(ux, uy, sz, door_side, 1, 0, OBJ_UFO_COMPUTER);
+        place_ufo_prop_local(ux, uy, sz, door_side, 2, 0, OBJ_UFO_NAV);
+        place_ufo_prop_local(ux, uy, sz, door_side, 4, 0, OBJ_UFO_NAV);
+        place_ufo_prop_local(ux, uy, sz, door_side, 5, 0, OBJ_UFO_COMPUTER);
+
+        /* Main Reactor & Bio-Stasis Deck: Central Elerium Core, Cryo Chambers, Tech Pods & Grav-Lift */
+        place_ufo_prop_local(ux, uy, sz, door_side, 3, 3, OBJ_UFO_CORE);
+        place_ufo_prop_local(ux, uy, sz, door_side, 1, 2, OBJ_UFO_CRYO);
+        place_ufo_prop_local(ux, uy, sz, door_side, 5, 2, OBJ_UFO_CRYO);
+        place_ufo_prop_local(ux, uy, sz, door_side, 1, 4, OBJ_UFO_POD);
+        place_ufo_prop_local(ux, uy, sz, door_side, 2, 5, OBJ_UFO_POD);
+        place_ufo_prop_local(ux, uy, sz, door_side, 4, 5, OBJ_UFO_POD);
+        place_ufo_prop_local(ux, uy, sz, door_side, 5, 4, OBJ_UFO_GRAVLIFT);
+    } else {
+        /* 5x5 Scout Saucer: Forward Navigation Alcove + Central Reactor + Cryo/Pod Bays + Grav-Lift */
+        place_ufo_prop_local(ux, uy, sz, door_side, 1, 0, OBJ_UFO_NAV);
+        place_ufo_prop_local(ux, uy, sz, door_side, 3, 0, OBJ_UFO_COMPUTER);
+        place_ufo_prop_local(ux, uy, sz, door_side, 2, 2, OBJ_UFO_CORE);
+        place_ufo_prop_local(ux, uy, sz, door_side, 0, 2, OBJ_UFO_CRYO);
+        place_ufo_prop_local(ux, uy, sz, door_side, 3, 3, OBJ_UFO_POD);
+        place_ufo_prop_local(ux, uy, sz, door_side, 3, 1, OBJ_UFO_GRAVLIFT);
+    }
+
+    /* Crash-landed saucers get scorched battle-damaged hull plates + a smoking flank hull breach! */
+    if (crashed) {
+        int br_rx = (rand() & 1) ? 0 : (sz - 1);
+        int br_ry = (sz == 7) ? 4 : 3;
+        int bx, by, b_side, b_pos;
+        uint8_t b_smoke = (uint8_t)(3 + (rand() % 3));
+        uint8_t b_fire  = (uint8_t)(2 + (rand() & 1));
+
+        ufo_rot_xy(ux, uy, sz, door_side, br_rx, br_ry, &bx, &by);
+        if (by == uy)       { b_side = 0; b_pos = bx; }
+        else if (by == uy1) { b_side = 2; b_pos = bx; }
+        else if (bx == ux)  { b_side = 3; b_pos = by; }
+        else                { b_side = 1; b_pos = by; }
+
+        carve_rect_door(ux, uy, ux1, uy1, b_side, b_pos, WALL_NONE);
+        g_map[0][by][bx].floor_id = FLOOR_SCORCHED;
+        isomap_clear_prop_at(0, by, bx, OBJ_RUBBLE, b_smoke);
+        g_map[0][by][bx].fire = b_fire;
+
+        /* Scar neighboring hull segments with ruptured plasma conduits */
+        if (b_side == 0 || b_side == 2) {
+            int wy_edge = (b_side == 0) ? uy : (uy1 + 1);
+            if (b_pos - 1 > ux  && g_map[0][wy_edge][b_pos - 1].wall_north == WALL_UFO_HULL)
+                g_map[0][wy_edge][b_pos - 1].wall_north = WALL_UFO_HULL_DMG;
+            if (b_pos + 1 < ux1 && g_map[0][wy_edge][b_pos + 1].wall_north == WALL_UFO_HULL)
+                g_map[0][wy_edge][b_pos + 1].wall_north = WALL_UFO_HULL_DMG;
+        } else {
+            int wx_edge = (b_side == 3) ? ux : (ux1 + 1);
+            if (b_pos - 1 > uy  && g_map[0][b_pos - 1][wx_edge].wall_west == WALL_UFO_HULL)
+                g_map[0][b_pos - 1][wx_edge].wall_west = WALL_UFO_HULL_DMG;
+            if (b_pos + 1 < uy1 && g_map[0][b_pos + 1][wx_edge].wall_west == WALL_UFO_HULL)
+                g_map[0][b_pos + 1][wx_edge].wall_west = WALL_UFO_HULL_DMG;
+        }
     }
 }
 
 /* Lay a paved highway or neighborhood street across the map */
 static void paint_road_strip(int vertical, int start_coord, int asphalt_w, int with_lamps, int num_cars) {
+    int road_len = vertical ? MAP_H : MAP_W;
     int i, w, c;
-    for (i = 0; i < MAP_W; i++) {
+    for (i = 0; i < road_len; i++) {
         int s_lo = start_coord - 1;
         int s_hi = start_coord + asphalt_w;
         if (vertical) {
@@ -379,7 +582,7 @@ static void paint_road_strip(int vertical, int start_coord, int asphalt_w, int w
 
     if (with_lamps) {
         int step = rrange(5, 7);
-        for (i = rrange(2, 4); i < MAP_W - 2; i += step) {
+        for (i = rrange(2, 4); i < road_len - 2; i += step) {
             if (vertical) {
                 place_prop_if_clear(start_coord - 1, i, 0, OBJ_STREETLAMP);
                 place_prop_if_clear(start_coord + asphalt_w, i + 1, 0, OBJ_STREETLAMP);
@@ -391,10 +594,72 @@ static void paint_road_strip(int vertical, int start_coord, int asphalt_w, int w
     }
 
     for (c = 0; c < num_cars; c++) {
-        int pos  = rrange(2, MAP_W - 3);
-        int lane = start_coord + (rand() % asphalt_w);
-        if (vertical) place_prop_if_clear(lane, pos, 0, OBJ_CAR_HOOD);
-        else          place_prop_if_clear(pos, lane, 0, OBJ_CAR_HOOD);
+        int vk = (c == 0) ? VEH_SEDAN : ((c == 1) ? VEH_CRUISER : VEH_PICKUP);
+        int tries;
+        for (tries = 0; tries < 24; tries++) {
+            int pos  = rrange(2, road_len - 4);
+            int lane = start_coord + (rand() % asphalt_w);
+            if (vertical) {
+                if (place_vehicle_if_clear(lane, pos, 0, 1, vk)) break;
+            } else {
+                if (place_vehicle_if_clear(pos, lane, 0, 0, vk)) break;
+            }
+        }
+    }
+}
+
+/* Lay a perpendicular side-street or farm lane spur without overwriting primary asphalt */
+static void paint_side_road(int vertical, int start_coord, int seg_lo, int seg_hi,
+                            int width, uint8_t road_floor, int with_walk) {
+    int i, w;
+    for (i = seg_lo; i <= seg_hi; i++) {
+        if (vertical) {
+            if ((unsigned)i >= MAP_H) continue;
+            if (with_walk) {
+                int s0 = start_coord - 1, s1 = start_coord + width;
+                if ((unsigned)s0 < MAP_W && g_map[0][i][s0].floor_id == FLOOR_GRASS) {
+                    g_map[0][i][s0].floor_id = FLOOR_SIDEWALK;
+                    if (zone_map[i][s0] == ZONE_FREE) zone_map[i][s0] = ZONE_ROAD;
+                }
+                if ((unsigned)s1 < MAP_W && g_map[0][i][s1].floor_id == FLOOR_GRASS) {
+                    g_map[0][i][s1].floor_id = FLOOR_SIDEWALK;
+                    if (zone_map[i][s1] == ZONE_FREE) zone_map[i][s1] = ZONE_ROAD;
+                }
+            }
+            for (w = 0; w < width; w++) {
+                int rx = start_coord + w;
+                if ((unsigned)rx < MAP_W) {
+                    uint8_t cur = g_map[0][i][rx].floor_id;
+                    if (cur != FLOOR_ASPHALT && cur != FLOOR_ASPHALT_LINE) {
+                        g_map[0][i][rx].floor_id = road_floor;
+                    }
+                    if (zone_map[i][rx] == ZONE_FREE) zone_map[i][rx] = ZONE_ROAD;
+                }
+            }
+        } else {
+            if ((unsigned)i >= MAP_W) continue;
+            if (with_walk) {
+                int s0 = start_coord - 1, s1 = start_coord + width;
+                if ((unsigned)s0 < MAP_H && g_map[0][s0][i].floor_id == FLOOR_GRASS) {
+                    g_map[0][s0][i].floor_id = FLOOR_SIDEWALK;
+                    if (zone_map[s0][i] == ZONE_FREE) zone_map[s0][i] = ZONE_ROAD;
+                }
+                if ((unsigned)s1 < MAP_H && g_map[0][s1][i].floor_id == FLOOR_GRASS) {
+                    g_map[0][s1][i].floor_id = FLOOR_SIDEWALK;
+                    if (zone_map[s1][i] == ZONE_FREE) zone_map[s1][i] = ZONE_ROAD;
+                }
+            }
+            for (w = 0; w < width; w++) {
+                int ry = start_coord + w;
+                if ((unsigned)ry < MAP_H) {
+                    uint8_t cur = g_map[0][ry][i].floor_id;
+                    if (cur != FLOOR_ASPHALT && cur != FLOOR_ASPHALT_LINE) {
+                        g_map[0][ry][i].floor_id = road_floor;
+                    }
+                    if (zone_map[ry][i] == ZONE_FREE) zone_map[ry][i] = ZONE_ROAD;
+                }
+            }
+        }
     }
 }
 
@@ -480,34 +745,44 @@ static void place_corn_patch(int x0, int y0, int x1, int y1) {
  * ========================================================================= */
 static void gen_biome_rte309(void) {
     int vert_hwy;
-    int hwy_pos    = rrange(9, 12);
+    int hwy_pos    = rrange(MAP_W / 2 - 4, MAP_W / 2 + 1);
     int swap_sides = rand() & 1;
-    int bx, by, w, h;
+    int bx, by, w, h, k;
 
     init_blank_map(FLOOR_GRASS);
     reserve_lz();
     vert_hwy = (g_lz_side <= 1) ? ((rand() % 100) < 70) : ((rand() % 100) < 35);
 
     paint_road_strip(vert_hwy, hwy_pos, 4, 1, 0);
+    /* Secondary perpendicular access street branching off Route 309 */
+    {
+        int spur_pos = rrange(8, (vert_hwy ? MAP_H : MAP_W) - 10);
+        if (rand() & 1) {
+            paint_side_road(!vert_hwy, spur_pos, 0, hwy_pos, 2, FLOOR_ASPHALT, 1);
+        } else {
+            paint_side_road(!vert_hwy, spur_pos, hwy_pos + 3,
+                            (vert_hwy ? MAP_W : MAP_H) - 1, 2, FLOOR_ASPHALT, 1);
+        }
+    }
     place_procedural_ufo();
 
     /* Place Route 309 Chrome Diner & 2-Story Duff's Arcade across the highway! */
-    w = rrange(5, 6); h = rrange(6, 7);
+    w = rrange(6, 7); h = rrange(6, 8);
     if (vert_hwy) {
         int d_minx = swap_sides ? (hwy_pos + 5) : 2;
-        int d_maxx = swap_sides ? 21 : (hwy_pos - 2);
+        int d_maxx = swap_sides ? LOT_MAX_X : (hwy_pos - 2);
         int a_minx = swap_sides ? 2 : (hwy_pos + 5);
-        int a_maxx = swap_sides ? (hwy_pos - 2) : 21;
+        int a_maxx = swap_sides ? (hwy_pos - 2) : LOT_MAX_X;
 
-        if (find_lot_flex(&w, &h, d_minx, d_maxx, 2, 21, &bx, &by)) {
+        if (find_lot_flex(&w, &h, d_minx, d_maxx, 2, LOT_MAX_Y, &bx, &by)) {
             BldgRect d = build_structure(bx, by, bx + w - 1, by + h - 1, 1,
                                          FLOOR_DINER_TILE, FLOOR_ROOF_TAR,
                                          WALL_DINER_CHROME, WALL_DINER_GLASS, 65, 1);
             furnish_diner(d, swap_sides ? 3 : 1);
         }
 
-        w = rrange(5, 6); h = rrange(6, 7);
-        if (find_lot_flex(&w, &h, a_minx, a_maxx, 2, 21, &bx, &by)) {
+        w = rrange(6, 7); h = rrange(6, 8);
+        if (find_lot_flex(&w, &h, a_minx, a_maxx, 2, LOT_MAX_Y, &bx, &by)) {
             BldgRect a = build_structure(bx, by, bx + w - 1, by + h - 1, 2,
                                          FLOOR_ARCADE_CARPET, FLOOR_WOOD,
                                          WALL_BRICK, WALL_BRICK_WIN, 45, 0);
@@ -515,20 +790,20 @@ static void gen_biome_rte309(void) {
         }
     } else {
         int d_miny = swap_sides ? (hwy_pos + 5) : 2;
-        int d_maxy = swap_sides ? 21 : (hwy_pos - 2);
+        int d_maxy = swap_sides ? LOT_MAX_Y : (hwy_pos - 2);
         int a_miny = swap_sides ? 2 : (hwy_pos + 5);
-        int a_maxy = swap_sides ? (hwy_pos - 2) : 21;
+        int a_maxy = swap_sides ? (hwy_pos - 2) : LOT_MAX_Y;
 
-        w = rrange(6, 7); h = rrange(5, 6);
-        if (find_lot_flex(&w, &h, 2, 21, d_miny, d_maxy, &bx, &by)) {
+        w = rrange(6, 8); h = rrange(6, 7);
+        if (find_lot_flex(&w, &h, 2, LOT_MAX_X, d_miny, d_maxy, &bx, &by)) {
             BldgRect d = build_structure(bx, by, bx + w - 1, by + h - 1, 1,
                                          FLOOR_DINER_TILE, FLOOR_ROOF_TAR,
                                          WALL_DINER_CHROME, WALL_DINER_GLASS, 65, 1);
             furnish_diner(d, swap_sides ? 0 : 2);
         }
 
-        w = rrange(6, 7); h = rrange(5, 6);
-        if (find_lot_flex(&w, &h, 2, 21, a_miny, a_maxy, &bx, &by)) {
+        w = rrange(6, 8); h = rrange(6, 7);
+        if (find_lot_flex(&w, &h, 2, LOT_MAX_X, a_miny, a_maxy, &bx, &by)) {
             BldgRect a = build_structure(bx, by, bx + w - 1, by + h - 1, 2,
                                          FLOOR_ARCADE_CARPET, FLOOR_WOOD,
                                          WALL_BRICK, WALL_BRICK_WIN, 45, 0);
@@ -536,37 +811,64 @@ static void gen_biome_rte309(void) {
         }
     }
 
-    /* Optional 3rd Roadside Garage / Service Shop or Corn Lot */
-    if (find_random_lot(4, 4, 2, 21, 2, 21, 0, &bx, &by)) {
-        if (rand() & 1) {
-            BldgRect g = build_structure(bx, by, bx + 3, by + 3, 1,
-                                         FLOOR_SIDEWALK, FLOOR_ROOF_TAR,
-                                         WALL_BRICK, WALL_BRICK_WIN, 35, 0);
-            carve_rect_door(g.x0, g.y0, g.x1, g.y1, 2, g.x0 + 1, WALL_DOOR_OPEN);
-            carve_rect_door(g.x0, g.y0, g.x1, g.y1, 0, g.x0 + 2, WALL_DOOR_CLOSED);
-            place_stairs_at(0, g.x0, g.y0);
-            place_prop_if_clear(g.x0 + 2, g.y0 + 2, 0, OBJ_BARREL);
-            place_prop_if_clear(g.x0 + 1, g.y0 + 1, 0, OBJ_CRATE);
-        } else {
-            place_corn_patch(bx, by, bx + 3, by + 3);
+    /* 3rd Building: Roadside Auto Service Garage / Body Shop */
+    if (find_random_lot(5, 5, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+        BldgRect g = build_structure(bx, by, bx + 4, by + 4, 1,
+                                     FLOOR_SIDEWALK, FLOOR_ROOF_TAR,
+                                     WALL_BRICK, WALL_BRICK_WIN, 35, 0);
+        carve_rect_door(g.x0, g.y0, g.x1, g.y1, 2, g.x0 + 2, WALL_DOOR_OPEN);
+        carve_rect_door(g.x0, g.y0, g.x1, g.y1, 0, g.x0 + 2, WALL_DOOR_CLOSED);
+        place_stairs_at(0, g.x0, g.y0);
+        place_prop_if_clear(g.x0 + 3, g.y0 + 3, 0, OBJ_BARREL);
+        place_prop_if_clear(g.x0 + 1, g.y0 + 2, 0, OBJ_CRATE);
+    }
+
+    /* 4th Building: Route 309 Roadside Motel / Mini-Mart Office */
+    w = rrange(5, 6); h = rrange(5, 6);
+    if (find_random_lot(w, h, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+        int st = 1 + (rand() & 1);
+        BldgRect m = build_structure(bx, by, bx + w - 1, by + h - 1, st,
+                                     FLOOR_WOOD, FLOOR_WOOD,
+                                     WALL_BRICK, WALL_BRICK_WIN, 55, 1);
+        carve_rect_door(m.x0, m.y0, m.x1, m.y1, 2, (m.x0 + m.x1) / 2, WALL_DOOR_CLOSED);
+        carve_rect_door(m.x0, m.y0, m.x1, m.y1, 0, (m.x0 + m.x1) / 2, WALL_DOOR_CLOSED);
+        place_stairs_safe(m.x0, m.y0);
+        if (st >= 2) {
+            place_stairs_at(1, m.x1, m.y1);
+            place_prop_if_clear(m.x0 + 1, m.y0 + 1, 1, OBJ_CRATE);
+        }
+        place_prop_if_clear(m.x1 - 1, m.y0 + 1, 0, OBJ_DINER_BOOTH);
+        place_prop_if_clear(m.x1 - 1, m.y1 - 1, 0, OBJ_JUKEBOX);
+    }
+
+    /* Undeveloped PA Corn / Tall Brush Lots behind the strip */
+    for (k = 0; k < 2; k++) {
+        int cw = rrange(4, 6), ch = rrange(4, 6);
+        if (find_random_lot(cw, ch, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+            place_corn_patch(bx, by, bx + cw - 1, by + ch - 1);
         }
     }
 
-    if (find_random_lot(4, 4, 2, 21, 2, 21, 0, &bx, &by)) {
-        place_corn_patch(bx, by, bx + 3, by + 3);
-    }
-
-    /* Scatter parked Route 309 cars, service alley barrels & crates */
+    /* Scatter parked Route 309 2-tile vehicles, service alley barrels & crates */
     {
-        int i;
-        for (i = 0; i < 3; i++) {
-            int pos = rrange(2, MAP_W - 3);
-            int lane = hwy_pos + (rand() % 4);
-            if (vert_hwy) place_prop_if_clear(lane, pos, 0, OBJ_CAR_HOOD);
-            else          place_prop_if_clear(pos, lane, 0, OBJ_CAR_HOOD);
+        int i, n_veh = rrange(5, 6);
+        int road_len = vert_hwy ? MAP_H : MAP_W;
+        for (i = 0; i < n_veh; i++) {
+            int vk = (i == 0 || i == 3) ? VEH_CRUISER :
+                     (i == 1 || i == 4) ? VEH_SEDAN   : VEH_PICKUP;
+            int tries;
+            for (tries = 0; tries < 32; tries++) {
+                int pos  = rrange(2, road_len - 4);
+                int lane = hwy_pos + (rand() % 4);
+                if (vert_hwy) {
+                    if (place_vehicle_if_clear(lane, pos, 0, 1, vk)) break;
+                } else {
+                    if (place_vehicle_if_clear(pos, lane, 0, 0, vk)) break;
+                }
+            }
         }
-        for (i = 0; i < 4; i++) {
-            int rx = rrange(2, 21), ry = rrange(2, 21);
+        for (i = 0; i < 8; i++) {
+            int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
             if (zone_map[ry][rx] == ZONE_FREE) {
                 place_prop_if_clear(rx, ry, 0, (i & 1) ? OBJ_BARREL : OBJ_CRATE);
             }
@@ -579,33 +881,31 @@ static void gen_biome_rte309(void) {
  * ========================================================================= */
 static void gen_biome_pa_farm(void) {
     int vert_lane = rand() & 1;
-    int lane_pos  = rrange(10, 13);
+    int lane_pos  = rrange(MAP_W / 2 - 3, MAP_W / 2 + 2);
+    int lane_len  = vert_lane ? MAP_H : MAP_W;
     int bx, by, bw, bh, i;
 
     init_blank_map(FLOOR_GRASS);
     reserve_lz();
 
-    /* Rural Farm Dirt/Gravel Lane */
-    for (i = 0; i < MAP_W; i++) {
-        if (vert_lane) {
-            g_map[0][i][lane_pos].floor_id     = FLOOR_SIDEWALK;
-            g_map[0][i][lane_pos + 1].floor_id = FLOOR_SIDEWALK;
-            if (zone_map[i][lane_pos] == ZONE_FREE)     zone_map[i][lane_pos] = ZONE_ROAD;
-            if (zone_map[i][lane_pos + 1] == ZONE_FREE) zone_map[i][lane_pos + 1] = ZONE_ROAD;
+    /* Rural Farm Dirt/Gravel Lane + Perpendicular Farmyard Track */
+    paint_side_road(vert_lane, lane_pos, 0, lane_len - 1, 2, FLOOR_SIDEWALK, 0);
+    {
+        int spur = rrange(8, lane_len - 9);
+        if (rand() & 1) {
+            paint_side_road(!vert_lane, spur, 0, lane_pos + 1, 2, FLOOR_SIDEWALK, 0);
         } else {
-            g_map[0][lane_pos][i].floor_id     = FLOOR_SIDEWALK;
-            g_map[0][lane_pos + 1][i].floor_id = FLOOR_SIDEWALK;
-            if (zone_map[lane_pos][i] == ZONE_FREE)     zone_map[lane_pos][i] = ZONE_ROAD;
-            if (zone_map[lane_pos + 1][i] == ZONE_FREE) zone_map[lane_pos + 1][i] = ZONE_ROAD;
+            paint_side_road(!vert_lane, spur, lane_pos,
+                            (vert_lane ? MAP_W : MAP_H) - 1, 2, FLOOR_SIDEWALK, 0);
         }
     }
 
     place_procedural_ufo();
 
     /* 2-Story Red Pennsylvania Barn with Randomized Hayloft */
-    bw = rrange(6, 7);
-    bh = rrange(6, 7);
-    if (find_random_lot(bw, bh, 2, 21, 2, 21, 0, &bx, &by)) {
+    bw = rrange(7, 8);
+    bh = rrange(7, 8);
+    if (find_random_lot(bw, bh, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
         BldgRect barn = build_structure(bx, by, bx + bw - 1, by + bh - 1, 2,
                                         FLOOR_WOOD, FLOOR_WOOD,
                                         WALL_BARN_WOOD, WALL_BRICK_WIN, 30, 0);
@@ -640,40 +940,87 @@ static void gen_biome_pa_farm(void) {
 
         place_stairs_safe(loft_style ? barn.x1 : barn.x0, loft_style ? barn.y0 : barn.y1);
         place_stairs_at(1, barn.x0, barn.y0);
-        place_prop_if_clear(mx, my, 0, OBJ_TRACTOR);
+        {
+            int barn_ay = (bay_side == 0 || bay_side == 2) ? 1 : 0;
+            int placed_barn_tr = 0, pass_ay, dy_off, dx_off;
+            for (pass_ay = 0; pass_ay < 2 && !placed_barn_tr; pass_ay++) {
+                int ay = pass_ay ? (1 - barn_ay) : barn_ay;
+                for (dy_off = -1; dy_off <= 1 && !placed_barn_tr; dy_off++) {
+                    for (dx_off = -1; dx_off <= 1 && !placed_barn_tr; dx_off++) {
+                        int tx = mx + dx_off, ty = my + dy_off;
+                        if (tx > barn.x0 && (tx + (ay ? 0 : 1)) < barn.x1 &&
+                            ty > barn.y0 && (ty + (ay ? 1 : 0)) < barn.y1) {
+                            placed_barn_tr = place_vehicle_if_clear(tx, ty, 0, ay, VEH_TRACTOR);
+                        }
+                    }
+                }
+            }
+        }
         place_prop_if_clear(barn.x0 + 1, barn.y0 + 1, 0, OBJ_CRATE);
         place_prop_if_clear(barn.x1 - 1, barn.y1 - 1, 0, OBJ_BARREL);
         place_prop_if_clear(loft_style ? barn.x1 - 1 : barn.x0 + 1,
                             loft_style ? barn.y0 + 1 : barn.y1 - 1, 1, OBJ_CRATE);
     }
 
-    /* Secondary Farmhouse or Equipment Shed */
-    if (find_random_lot(5, 5, 2, 21, 2, 21, 0, &bx, &by)) {
-        int is_house = rand() & 1;
-        BldgRect sh = build_structure(bx, by, bx + 4, by + 4, 1,
-                                      FLOOR_WOOD, FLOOR_ROOF_TAR,
-                                      is_house ? WALL_BRICK : WALL_BARN_WOOD,
-                                      WALL_BRICK_WIN, 50, 0);
-        carve_rect_door(sh.x0, sh.y0, sh.x1, sh.y1, 2, sh.x0 + 2, WALL_DOOR_CLOSED);
-        carve_rect_door(sh.x0, sh.y0, sh.x1, sh.y1, 0, sh.x0 + 2, is_house ? WALL_DOOR_CLOSED : WALL_DOOR_OPEN);
-        place_stairs_at(0, sh.x0, sh.y0);
-        place_prop_if_clear(sh.x0 + 1, sh.y0 + 1, 0, is_house ? OBJ_DINER_BOOTH : OBJ_CRATE);
-        place_prop_if_clear(sh.x1 - 1, sh.y1 - 1, 0, is_house ? OBJ_JUKEBOX : OBJ_BARREL);
+    /* 2-Story Brick Pennsylvania Farmhouse */
+    if (find_random_lot(6, 6, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+        BldgRect fh = build_structure(bx, by, bx + 5, by + 5, 2,
+                                      FLOOR_WOOD, FLOOR_WOOD,
+                                      WALL_BRICK, WALL_BRICK_WIN, 55, 0);
+        carve_rect_door(fh.x0, fh.y0, fh.x1, fh.y1, 2, fh.x0 + 2, WALL_DOOR_CLOSED);
+        carve_rect_door(fh.x0, fh.y0, fh.x1, fh.y1, 0, fh.x0 + 3, WALL_DOOR_CLOSED);
+        place_stairs_safe(fh.x0, fh.y0);
+        place_stairs_at(1, fh.x0, fh.y1);
+        place_prop_if_clear(fh.x0 + 1, fh.y0 + 1, 0, OBJ_DINER_BOOTH);
+        place_prop_if_clear(fh.x1 - 1, fh.y1 - 1, 0, OBJ_JUKEBOX);
+        place_prop_if_clear(fh.x1 - 1, fh.y0 + 1, 1, OBJ_CRATE);
     }
 
-    /* 3 Randomized Fenced Pennsylvania Cornfields */
-    for (i = 0; i < 3; i++) {
-        int cw = rrange(4, 6), ch = rrange(4, 6);
-        if (find_random_lot(cw, ch, 2, 21, 2, 21, 0, &bx, &by)) {
+    /* Wooden Equipment Shed / Feed Store */
+    if (find_random_lot(5, 5, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+        BldgRect sh = build_structure(bx, by, bx + 4, by + 4, 1,
+                                      FLOOR_WOOD, FLOOR_ROOF_TAR,
+                                      WALL_BARN_WOOD, WALL_BRICK_WIN, 35, 0);
+        carve_rect_door(sh.x0, sh.y0, sh.x1, sh.y1, 2, sh.x0 + 2, WALL_DOOR_OPEN);
+        carve_rect_door(sh.x0, sh.y0, sh.x1, sh.y1, 0, sh.x0 + 2, WALL_DOOR_CLOSED);
+        place_stairs_at(0, sh.x0, sh.y0);
+        place_prop_if_clear(sh.x0 + 1, sh.y0 + 1, 0, OBJ_CRATE);
+        place_prop_if_clear(sh.x1 - 1, sh.y1 - 1, 0, OBJ_BARREL);
+    }
+
+    /* 5 Randomized Fenced Pennsylvania Cornfields */
+    for (i = 0; i < 5; i++) {
+        int cw = rrange(5, 7), ch = rrange(5, 7);
+        if (find_random_lot(cw, ch, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
             place_corn_patch(bx, by, bx + cw - 1, by + ch - 1);
         }
     }
 
-    /* Outdoor Farm Tractors, Fuel Drums & Supply Crates */
-    for (i = 0; i < 6; i++) {
-        int rx = rrange(2, 21), ry = rrange(2, 21);
+    /* Outdoor 2-Tile Farm Tractors / Farm Pickup, Fuel Drums & Supply Crates */
+    for (i = 0; i < 3; i++) {
+        int vk = (i == 1) ? VEH_PICKUP : VEH_TRACTOR;
+        int placed = 0, tries;
+        if (i >= 1 && (rand() & 1)) {
+            for (tries = 0; tries < 24 && !placed; tries++) {
+                int pos  = rrange(2, lane_len - 4);
+                int lane = lane_pos + (rand() & 1);
+                placed = vert_lane ? place_vehicle_if_clear(lane, pos, 0, 1, vk)
+                                   : place_vehicle_if_clear(pos, lane, 0, 0, vk);
+            }
+        }
+        for (tries = 0; tries < 40 && !placed; tries++) {
+            int ay = rand() & 1;
+            int rx = rrange(2, ay ? LOT_MAX_X : (LOT_MAX_X - 1));
+            int ry = rrange(2, ay ? (LOT_MAX_Y - 1) : LOT_MAX_Y);
+            if (zone_map[ry][rx] == ZONE_FREE) {
+                placed = place_vehicle_if_clear(rx, ry, 0, ay, vk);
+            }
+        }
+    }
+    for (i = 0; i < 8; i++) {
+        int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
         if (zone_map[ry][rx] == ZONE_FREE) {
-            uint8_t obj = (i < 2) ? OBJ_TRACTOR : ((i & 1) ? OBJ_BARREL : OBJ_CRATE);
+            uint8_t obj = (i < 4) ? OBJ_BARREL : (i < 7 ? OBJ_CRATE : OBJ_STREETLAMP);
             place_prop_if_clear(rx, ry, 0, obj);
         }
     }
@@ -689,22 +1036,28 @@ static void gen_biome_suburb(void) {
     init_blank_map(FLOOR_GRASS);
     reserve_lz();
 
-    if (g_lz_side == 0)      { vert_st = 0; st_pos = 18; }
-    else if (g_lz_side == 1) { vert_st = 0; st_pos = 3;  }
-    else if (g_lz_side == 2) { vert_st = 1; st_pos = 3;  }
-    else                     { vert_st = 1; st_pos = 18; }
+    if (g_lz_side == 0)      { vert_st = 0; st_pos = MAP_H - 6; }
+    else if (g_lz_side == 1) { vert_st = 0; st_pos = 3;         }
+    else if (g_lz_side == 2) { vert_st = 1; st_pos = 3;         }
+    else                     { vert_st = 1; st_pos = MAP_W - 6; }
 
-    /* 40% chance street cuts right through the middle of the neighborhood instead! */
-    if ((rand() % 100) < 40) {
+    /* 55% chance main street cuts right through the middle of the neighborhood! */
+    if ((rand() % 100) < 55) {
         vert_st = rand() & 1;
-        st_pos  = rrange(10, 12);
+        st_pos  = rrange(MAP_W / 2 - 3, MAP_W / 2 + 1);
     }
 
-    paint_road_strip(vert_st, st_pos, 3, 1, 3);
+    paint_road_strip(vert_st, st_pos, 3, 1, 0);
+    /* Perpendicular suburban residential cross-street */
+    {
+        int cross_pos = rrange(9, (vert_st ? MAP_H : MAP_W) - 10);
+        paint_side_road(!vert_st, cross_pos, 0, (vert_st ? MAP_W : MAP_H) - 1,
+                        2, FLOOR_ASPHALT, 1);
+    }
     place_procedural_ufo();
 
-    /* Try Split-Wing Mega-Arcade Residence (50%), otherwise Twin Suburban Houses! */
-    if ((rand() & 1) && find_random_lot(11, 6, 2, 21, 2, 21, 0, &bx, &by)) {
+    /* House 1 & 2: Split-Wing Mega-Arcade Residence (50%) or Twin 2-Story Suburban Homes! */
+    if ((rand() & 1) && find_random_lot(11, 6, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
         int split_x = bx + 5;
         int x, y;
         BldgRect h = build_structure(bx, by, bx + 10, by + 5, 1,
@@ -730,19 +1083,21 @@ static void gen_biome_suburb(void) {
             place_prop_if_clear(x, by + 4, 0, OBJ_ARCADE_CAB);
         }
     } else {
-        /* House 1: Duff's 2-Story Suburban Arcade House */
         int w1 = rrange(6, 7), h1 = rrange(5, 6);
-        if (find_lot_flex(&w1, &h1, 2, 21, 2, 21, &bx, &by)) {
+        if (find_lot_flex(&w1, &h1, 2, LOT_MAX_X, 2, LOT_MAX_Y, &bx, &by)) {
             BldgRect a = build_structure(bx, by, bx + w1 - 1, by + h1 - 1, 2,
                                          FLOOR_ARCADE_CARPET, FLOOR_WOOD,
                                          WALL_BRICK, WALL_BRICK_WIN, 60, 0);
             furnish_arcade(a, 2);
             carve_rect_door(a.x0, a.y0, a.x1, a.y1, 0, (a.x0 + a.x1) / 2, WALL_DOOR_CLOSED);
         }
-        /* House 2: Neighbor's Brick Colonial Home */
-        w1 = rrange(5, 6); h1 = rrange(5, 6);
-        if (find_random_lot(w1, h1, 2, 21, 2, 21, 0, &bx, &by)) {
-            BldgRect n = build_structure(bx, by, bx + w1 - 1, by + h1 - 1, 2,
+    }
+
+    /* Neighbor's 2-Story Brick Colonial Home */
+    {
+        int w2 = rrange(5, 6), h2 = rrange(5, 6);
+        if (find_random_lot(w2, h2, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+            BldgRect n = build_structure(bx, by, bx + w2 - 1, by + h2 - 1, 2,
                                          FLOOR_WOOD, FLOOR_WOOD,
                                          WALL_BRICK, WALL_BRICK_WIN, 65, 0);
             carve_rect_door(n.x0, n.y0, n.x1, n.y1, 2, (n.x0 + n.x1) / 2, WALL_DOOR_CLOSED);
@@ -755,14 +1110,59 @@ static void gen_biome_suburb(void) {
         }
     }
 
-    /* Backyard Hedges, Fences & Patio Props */
-    if (find_random_lot(4, 4, 2, 21, 2, 21, 0, &bx, &by)) {
-        place_corn_patch(bx, by, bx + 3, by + 3);
+    /* Corner Suburban Ranch House */
+    if (find_random_lot(6, 5, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+        BldgRect r = build_structure(bx, by, bx + 5, by + 4, 1,
+                                     FLOOR_WOOD, FLOOR_ROOF_TAR,
+                                     WALL_BRICK, WALL_BRICK_WIN, 60, 1);
+        carve_rect_door(r.x0, r.y0, r.x1, r.y1, 2, r.x0 + 2, WALL_DOOR_CLOSED);
+        carve_rect_door(r.x0, r.y0, r.x1, r.y1, 1, r.y0 + 2, WALL_DOOR_CLOSED);
+        place_stairs_safe(r.x0, r.y0);
+        place_prop_if_clear(r.x0 + 1, r.y0 + 3, 0, OBJ_DINER_BOOTH);
+        place_prop_if_clear(r.x1 - 1, r.y0 + 1, 0, OBJ_JUKEBOX);
     }
-    for (i = 0; i < 4; i++) {
-        int rx = rrange(2, 21), ry = rrange(2, 21);
+
+    /* Detached Neighborhood Garage / Workshop */
+    if (find_random_lot(5, 4, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+        BldgRect g = build_structure(bx, by, bx + 4, by + 3, 1,
+                                     FLOOR_SIDEWALK, FLOOR_ROOF_TAR,
+                                     WALL_BRICK, WALL_BRICK_WIN, 30, 0);
+        carve_rect_door(g.x0, g.y0, g.x1, g.y1, 2, g.x0 + 2, WALL_DOOR_OPEN);
+        carve_rect_door(g.x0, g.y0, g.x1, g.y1, 0, g.x0 + 2, WALL_DOOR_CLOSED);
+        place_stairs_at(0, g.x0, g.y0);
+        place_prop_if_clear(g.x1 - 1, g.y1 - 1, 0, OBJ_BARREL);
+        place_prop_if_clear(g.x0 + 1, g.y0 + 1, 0, OBJ_CRATE);
+    }
+
+    /* Parked 2-Tile Street Vehicles (placed after UFO & doorways so paths stay clear) */
+    {
+        int st_len = vert_st ? MAP_H : MAP_W;
+        for (i = 0; i < 5; i++) {
+            int vk = (i == 0 || i == 3) ? VEH_SEDAN : ((i == 1) ? VEH_CRUISER : VEH_PICKUP);
+            int tries;
+            for (tries = 0; tries < 32; tries++) {
+                int pos  = rrange(2, st_len - 4);
+                int lane = st_pos + (rand() % 3);
+                if (vert_st) {
+                    if (place_vehicle_if_clear(lane, pos, 0, 1, vk)) break;
+                } else {
+                    if (place_vehicle_if_clear(pos, lane, 0, 0, vk)) break;
+                }
+            }
+        }
+    }
+
+    /* Backyard Hedges, Fenced Garden Plots & Patio Props */
+    for (i = 0; i < 3; i++) {
+        int gw = rrange(4, 5), gh = rrange(4, 5);
+        if (find_random_lot(gw, gh, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+            place_corn_patch(bx, by, bx + gw - 1, by + gh - 1);
+        }
+    }
+    for (i = 0; i < 7; i++) {
+        int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
         if (zone_map[ry][rx] == ZONE_FREE) {
-            place_prop_if_clear(rx, ry, 0, (i == 0) ? OBJ_DINER_BOOTH : ((i & 1) ? OBJ_CRATE : OBJ_BARREL));
+            place_prop_if_clear(rx, ry, 0, (i < 2) ? OBJ_DINER_BOOTH : ((i & 1) ? OBJ_CRATE : OBJ_BARREL));
         }
     }
 }
@@ -825,16 +1225,16 @@ static void build_catwalk_between(BldgRect a, BldgRect b) {
 }
 
 static void gen_biome_steel(void) {
-    BldgRect towers[3];
+    BldgRect towers[5];
     int num_towers = 0;
-    int bx, by, i, s;
+    int bx, by, i, j, s;
 
     init_blank_map(FLOOR_ASPHALT);
     reserve_lz();
 
-    /* Random scorched blast-furnace slag zones on ground floor */
-    for (s = 0; s < 5; s++) {
-        int sx = rrange(2, 19), sy = rrange(2, 19);
+    /* Random scorched blast-furnace slag zones across ground floor */
+    for (s = 0; s < 9; s++) {
+        int sx = rrange(2, MAP_W - 5), sy = rrange(2, MAP_H - 5);
         int dy, dx;
         for (dy = 0; dy < 3; dy++) {
             for (dx = 0; dx < 3; dx++) {
@@ -845,38 +1245,54 @@ static void gen_biome_steel(void) {
 
     place_procedural_ufo();
 
-    /* Build 2 to 3 Multi-Story Steel Blast-Furnace Towers */
+    /* Build 4 to 5 Steel Blast-Furnace Towers & 2-Story Central Foundry */
     memset(towers, 0, sizeof(towers));
-    for (i = 0; i < 3; i++) {
-        int tw = rrange(5, 6), th = rrange(5, 6);
-        if (find_random_lot(tw, th, 2, 21, 2, 21, 0, &bx, &by)) {
-            BldgRect t = build_structure(bx, by, bx + tw - 1, by + th - 1, 1,
-                                         FLOOR_SIDEWALK, FLOOR_ROOF_TAR,
-                                         WALL_STEEL, WALL_BRICK_WIN, 20, 1);
+    for (i = 0; i < 5; i++) {
+        int tw = rrange(5, 7), th = rrange(5, 7);
+        int stories = (i == 0) ? 2 : 1;
+        if (find_random_lot(tw, th, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+            BldgRect t = build_structure(bx, by, bx + tw - 1, by + th - 1, stories,
+                                         FLOOR_SIDEWALK, FLOOR_SIDEWALK,
+                                         WALL_STEEL, WALL_BRICK_WIN, 22, 1);
             int mx = (t.x0 + t.x1) / 2;
             int my = (t.y0 + t.y1) / 2;
             carve_rect_door(t.x0, t.y0, t.x1, t.y1, 0, mx, WALL_DOOR_OPEN);
             carve_rect_door(t.x0, t.y0, t.x1, t.y1, 2, mx, WALL_DOOR_CLOSED);
             carve_rect_door(t.x0, t.y0, t.x1, t.y1, (i & 1) ? 1 : 3, my, WALL_DOOR_OPEN);
             place_stairs_safe((i & 1) ? t.x1 : t.x0, (i & 1) ? t.y1 : t.y0);
-            place_prop_if_clear(mx, my, 0, (i == 0) ? OBJ_BARREL : OBJ_CRATE);
+            if (stories >= 2) {
+                place_stairs_at(1, t.x0, t.y1);
+                place_prop_if_clear(t.x0 + 1, t.y0 + 1, 1, OBJ_CRATE);
+            }
+            place_prop_if_clear(mx, my, 0, (i & 1) ? OBJ_CRATE : OBJ_BARREL);
             towers[num_towers++] = t;
         }
     }
 
     /* Connect aligned Furnace Towers with Elevated Level-1 Steel Catwalks! */
-    if (num_towers >= 2) build_catwalk_between(towers[0], towers[1]);
-    if (num_towers >= 3) {
-        build_catwalk_between(towers[0], towers[2]);
-        build_catwalk_between(towers[1], towers[2]);
+    for (i = 0; i < num_towers; i++) {
+        for (j = i + 1; j < num_towers; j++) {
+            build_catwalk_between(towers[i], towers[j]);
+        }
     }
 
-    /* Scatter Explosive Fuel Barrel Clusters, Cargo Crates, Industrial Floodlights & Wrecks */
-    for (i = 0; i < 12; i++) {
-        int rx = rrange(2, 21), ry = rrange(2, 21);
+    /* Scatter 2-Tile Industrial Yard Vehicles, Explosive Barrel Clusters, Crates & Floodlights */
+    for (i = 0; i < 4; i++) {
+        int vk = (i == 1) ? VEH_CRUISER : VEH_PICKUP;
+        int tries;
+        for (tries = 0; tries < 40; tries++) {
+            int ay = rand() & 1;
+            int rx = rrange(2, ay ? LOT_MAX_X : (LOT_MAX_X - 1));
+            int ry = rrange(2, ay ? (LOT_MAX_Y - 1) : LOT_MAX_Y);
+            if (zone_map[ry][rx] == ZONE_FREE) {
+                if (place_vehicle_if_clear(rx, ry, 0, ay, vk)) break;
+            }
+        }
+    }
+    for (i = 0; i < 18; i++) {
+        int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
         if (zone_map[ry][rx] == ZONE_FREE) {
-            uint8_t obj = (i < 6) ? OBJ_BARREL : (i < 9) ? OBJ_CRATE :
-                          (i < 11) ? OBJ_STREETLAMP : OBJ_CAR_HOOD;
+            uint8_t obj = (i < 9) ? OBJ_BARREL : (i < 14) ? OBJ_CRATE : OBJ_STREETLAMP;
             place_prop_if_clear(rx, ry, 0, obj);
         }
     }
@@ -922,7 +1338,17 @@ static void compute_reachability(int start_x, int start_y) {
 }
 
 static int is_blocking_prop(uint8_t obj_id) {
-    return (obj_id != OBJ_NONE && obj_id != OBJ_STAIRS_UP && obj_id != OBJ_RUBBLE);
+    return (obj_id != OBJ_NONE && !isomap_is_lift_obj(obj_id) && obj_id != OBJ_RUBBLE);
+}
+
+static int is_protected_ufo_prop(uint8_t obj_id) {
+    return (isomap_is_ufo_corner_obj(obj_id) ||
+            obj_id == OBJ_UFO_CORE     ||
+            obj_id == OBJ_UFO_NAV      ||
+            obj_id == OBJ_UFO_COMPUTER ||
+            obj_id == OBJ_UFO_CRYO     ||
+            obj_id == OBJ_UFO_POD      ||
+            obj_id == OBJ_UFO_GRAVLIFT);
 }
 
 static void open_edge_between(int z, int x0, int y0, int x1, int y1) {
@@ -933,7 +1359,13 @@ static void open_edge_between(int z, int x0, int y0, int x1, int y1) {
     else if (y1 == y0 - 1) wptr = &g_map[z][y0][x0].wall_north;
 
     if (wptr && isomap_wall_blocks_move(*wptr)) {
-        *wptr = (*wptr == WALL_FENCE || *wptr == WALL_FENCE_DMG) ? WALL_NONE : WALL_DOOR_OPEN;
+        if (*wptr == WALL_FENCE || *wptr == WALL_FENCE_DMG) {
+            *wptr = WALL_NONE;
+        } else if (*wptr == WALL_UFO_HULL || *wptr == WALL_UFO_HULL_DMG || *wptr == WALL_UFO_DOOR_CLOSED) {
+            *wptr = WALL_UFO_DOOR_OPEN;
+        } else {
+            *wptr = WALL_DOOR_OPEN;
+        }
     }
 }
 
@@ -944,13 +1376,14 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
     int i, pass;
 
     if (is_blocking_prop(g_map[0][lz_cy][lz_cx].obj_id)) {
-        g_map[0][lz_cy][lz_cx].obj_id = OBJ_NONE;
+        isomap_clear_prop_at(0, lz_cy, lz_cx, OBJ_NONE, 0);
     }
     compute_reachability(lz_cx, lz_cy);
 
     /* 1. First verify every ground-floor building & UFO interior has an open path */
     for (i = -1; i < g_num_bldgs; i++) {
         BldgRect r = (i < 0) ? g_ufo_rect : g_bldgs[i];
+        uint8_t dwall = (i < 0) ? WALL_UFO_DOOR_OPEN : WALL_DOOR_OPEN;
         int x, y, any_reach = 0;
         if (!r.valid) continue;
         for (y = r.y0; y <= r.y1 && !any_reach; y++) {
@@ -959,16 +1392,16 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
             }
         }
         if (!any_reach) {
-            carve_rect_door(r.x0, r.y0, r.x1, r.y1, 0, (r.x0 + r.x1) / 2, WALL_DOOR_OPEN);
-            carve_rect_door(r.x0, r.y0, r.x1, r.y1, 2, (r.x0 + r.x1) / 2, WALL_DOOR_OPEN);
-            carve_rect_door(r.x0, r.y0, r.x1, r.y1, 3, (r.y0 + r.y1) / 2, WALL_DOOR_OPEN);
-            carve_rect_door(r.x0, r.y0, r.x1, r.y1, 1, (r.y0 + r.y1) / 2, WALL_DOOR_OPEN);
+            carve_rect_door(r.x0, r.y0, r.x1, r.y1, 0, (r.x0 + r.x1) / 2, dwall);
+            carve_rect_door(r.x0, r.y0, r.x1, r.y1, 2, (r.x0 + r.x1) / 2, dwall);
+            carve_rect_door(r.x0, r.y0, r.x1, r.y1, 3, (r.y0 + r.y1) / 2, dwall);
+            carve_rect_door(r.x0, r.y0, r.x1, r.y1, 1, (r.y0 + r.y1) / 2, dwall);
             compute_reachability(lz_cx, lz_cy);
         }
     }
 
     /* 2. Audit every floor tile on z = 0, 1, 2; repair isolated pockets & missing upper-level stairs! */
-    for (pass = 0; pass < 48; pass++) {
+    for (pass = 0; pass < 96; pass++) {
         int uz = -1, ux = -1, uy = -1;
         int z, y, x;
 
@@ -987,8 +1420,8 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
         if (uz < 0) break; /* 100% of walkable floor tiles across ALL levels are reachable! */
 
         {
-            uint8_t in_comp[MAP_H][MAP_W];
-            int16_t cx_q[MAP_W * MAP_H], cy_q[MAP_W * MAP_H];
+            static uint8_t in_comp[MAP_H][MAP_W];
+            static int16_t cx_q[MAP_W * MAP_H], cy_q[MAP_W * MAP_H];
             int qh = 0, qt = 0, repaired = 0, k, d;
 
             memset(in_comp, 0, sizeof(in_comp));
@@ -1032,12 +1465,12 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
             for (k = 0; k < qt && !repaired; k++) {
                 int px = cx_q[k], py = cy_q[k];
                 uint8_t pobj = g_map[uz][py][px].obj_id;
-                if (!is_blocking_prop(pobj) || pobj == OBJ_UFO_CORE) continue;
+                if (!is_blocking_prop(pobj) || is_protected_ufo_prop(pobj)) continue;
                 for (d = 0; d < 4; d++) {
                     int rx = px + odx[d], ry = py + ody[d];
                     if ((unsigned)rx >= MAP_W || (unsigned)ry >= MAP_H) continue;
                     if (reach_mask[uz][ry][rx]) {
-                        g_map[uz][py][px].obj_id = OBJ_NONE;
+                        isomap_clear_prop_at(uz, py, px, OBJ_NONE, 0);
                         open_edge_between(uz, px, py, rx, ry);
                         repaired = 1;
                         break;
@@ -1054,10 +1487,10 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
                     uint8_t up_obj  = g_map[uz][sy][sx].obj_id;
                     int score = 10;
                     if (!reach_mask[uz - 1][sy][sx]) continue;
-                    if (low_obj == OBJ_STAIRS_UP || low_obj == OBJ_UFO_CORE) continue;
-                    if (up_obj == OBJ_STAIRS_UP  || up_obj == OBJ_UFO_CORE) continue;
-                    if (uz - 1 > 0 && g_map[uz - 2][sy][sx].obj_id == OBJ_STAIRS_UP) continue;
-                    if (uz == 1 && zone_map[sy][sx] == ZONE_LZ) continue;
+                    if (isomap_is_lift_obj(low_obj) || is_protected_ufo_prop(low_obj)) continue;
+                    if (isomap_is_lift_obj(up_obj)  || is_protected_ufo_prop(up_obj))  continue;
+                    if (uz - 1 > 0 && isomap_is_lift_obj(g_map[uz - 2][sy][sx].obj_id)) continue;
+                    if (uz == 1 && (zone_map[sy][sx] == ZONE_LZ || zone_map[sy][sx] == ZONE_UFO)) continue;
                     if (low_obj == OBJ_NONE) score += 20;
                     if (up_obj == OBJ_NONE)  score += 20;
                     if (uz == 1 && zone_map[sy][sx] != ZONE_DOORWAY) score += 10;
@@ -1089,8 +1522,8 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
                         if ((unsigned)ax >= MAP_W || (unsigned)ay >= MAP_H) continue;
                         if (!reach_mask[uz - 1][ay][ax]) continue;
                         if (g_map[uz - 1][ay][ax].obj_id != OBJ_NONE) continue;
-                        if (uz - 1 > 0 && g_map[uz - 2][ay][ax].obj_id == OBJ_STAIRS_UP) continue;
-                        if (uz == 1 && zone_map[ay][ax] == ZONE_LZ) continue;
+                        if (uz - 1 > 0 && isomap_is_lift_obj(g_map[uz - 2][ay][ax].obj_id)) continue;
+                        if (uz == 1 && (zone_map[ay][ax] == ZONE_LZ || zone_map[ay][ax] == ZONE_UFO)) continue;
                         place_stairs_at(uz - 1, ax, ay);
                         open_edge_between(uz, ax, ay, px, py);
                         repaired = 1;
@@ -1108,8 +1541,8 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
                         g_map[uz][step_y][step_x].floor_id = FLOOR_WOOD;
                     }
                     if (is_blocking_prop(g_map[uz][step_y][step_x].obj_id) &&
-                        g_map[uz][step_y][step_x].obj_id != OBJ_UFO_CORE) {
-                        g_map[uz][step_y][step_x].obj_id = OBJ_NONE;
+                        !is_protected_ufo_prop(g_map[uz][step_y][step_x].obj_id)) {
+                        isomap_clear_prop_at(uz, step_y, step_x, OBJ_NONE, 0);
                     }
                     open_edge_between(uz, ux, uy, step_x, step_y);
                 }
@@ -1122,10 +1555,13 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
 
 static int tile_free_for_spawn(int x, int y, int z, const ProcSpawnPlan *plan, int placed_aliens) {
     int i;
+    uint8_t fid;
     if ((unsigned)x >= MAP_W || (unsigned)y >= MAP_H || (unsigned)z >= MAP_LEVS) return 0;
-    if (g_map[z][y][x].floor_id == FLOOR_NONE) return 0;
+    fid = g_map[z][y][x].floor_id;
+    if (fid == FLOOR_NONE) return 0;
+    if (fid >= FLOOR_UFO_ROOF_N && fid <= FLOOR_UFO_ROOF_W) return 0;
     if (g_map[z][y][x].obj_id != OBJ_NONE && g_map[z][y][x].obj_id != OBJ_RUBBLE) return 0;
-    if (z > 0 && g_map[z - 1][y][x].obj_id == OBJ_STAIRS_UP) return 0;
+    if (z > 0 && isomap_is_lift_obj(g_map[z - 1][y][x].obj_id)) return 0;
     if (!reach_mask[z][y][x]) return 0;
 
     for (i = 0; i < 5; i++) {
@@ -1146,11 +1582,20 @@ static int min_squad_dist(int x, int y, const ProcSpawnPlan *plan) {
     return best;
 }
 
+static int min_other_alien_dist(int x, int y, const ProcSpawnPlan *plan, int placed_aliens) {
+    int i, best = 999;
+    for (i = 0; i < placed_aliens; i++) {
+        int d = abs(x - plan->alien_x[i]) + abs(y - plan->alien_y[i]);
+        if (d < best) best = d;
+    }
+    return best;
+}
+
 static int any_squad_has_los(int x, int y, int z, const ProcSpawnPlan *plan) {
     int i;
     for (i = 0; i < 5; i++) {
         int d = abs(x - plan->squad_x[i]) + abs(y - plan->squad_y[i]);
-        if (d <= 17 && isomap_has_los(plan->squad_x[i], plan->squad_y[i], 0, x, y, z)) {
+        if (d <= 18 && isomap_has_los(plan->squad_x[i], plan->squad_y[i], 0, x, y, z)) {
             return 1;
         }
     }
@@ -1160,7 +1605,7 @@ static int any_squad_has_los(int x, int y, int z, const ProcSpawnPlan *plan) {
 static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
     int cx = (g_lz_x0 + g_lz_x1) / 2;
     int cy = (g_lz_y0 + g_lz_y1) / 2;
-    int a_count = 5 + (rand() & 1); /* 5 or 6 aliens per mission */
+    int a_count = ((g_ufo_sz == 7) ? 7 : 6) + (rand() & 1); /* 6..8 aliens across the 34x34 sector */
     int a;
 
     memset(plan, 0, sizeof(*plan));
@@ -1190,7 +1635,7 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
     plan->num_aliens = a_count;
     for (a = 0; a < a_count; a++) {
         int utype, found = 0, tries;
-        int ax = 12, ay = 12, az = 0;
+        int ax = MAP_W / 2, ay = MAP_H / 2, az = 0;
 
         /* Role-based + Biome-weighted randomized alien species */
         if (a == 0) {
@@ -1199,9 +1644,13 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
         } else if (a == 1) {
             utype = 2; /* Rooftop / Hayloft / Catwalk Floater Sniper */
             plan->alien_name[a] = "FLOATER SNIPER";
-        } else if (a == 2) {
-            utype = (rand() % 100 < 55) ? 1 : 3; /* Building Interior Lurker */
+        } else if (a == 2 || a == 3) {
+            utype = (rand() % 100 < 55) ? 1 : 3; /* Building / Cornfield Lurker */
             plan->alien_name[a] = (utype == 3) ? "MUTON ENFORCER" : "SECTOID STALKER";
+        } else if (a == 4 && g_ufo_sz == 7) {
+            utype = (rand() % 100 < 45) ? 1 : (rand() & 1 ? 2 : 3); /* Cruiser Reactor/Stasis Crew */
+            plan->alien_name[a] = (utype == 1) ? "SECTOID NAVIGATOR" :
+                                  (utype == 2) ? "FLOATER TECH" : "MUTON GUARD";
         } else {
             int r = rand() % 100;
             utype = (r < 45) ? 1 : (r < 78) ? 2 : 3;
@@ -1209,9 +1658,18 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
                                   (utype == 2) ? "FLOATER PATROL" : "MUTON WARRIOR";
         }
 
-        /* Role 0: Inside UFO Hull */
+        /* Role 0: Guarding UFO Navigation Area / Bridge */
         if (a == 0 && g_ufo_rect.valid) {
             for (tries = 0; tries < 40 && !found; tries++) {
+                int rx = rrange(1, g_ufo_sz - 2);
+                int ry = rrange(0, 1);
+                int tx, ty;
+                ufo_rot_xy(g_ufo_rect.x0, g_ufo_rect.y0, g_ufo_sz, g_ufo_door_side, rx, ry, &tx, &ty);
+                if (tile_free_for_spawn(tx, ty, 0, plan, a)) {
+                    ax = tx; ay = ty; az = 0; found = 1;
+                }
+            }
+            for (tries = 0; tries < 50 && !found; tries++) {
                 int tx = rrange(g_ufo_rect.x0, g_ufo_rect.x1);
                 int ty = rrange(g_ufo_rect.y0, g_ufo_rect.y1);
                 if (tile_free_for_spawn(tx, ty, 0, plan, a)) {
@@ -1219,45 +1677,59 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
                 }
             }
         }
-        /* Role 1: Elevated z=1 Rooftop, Hayloft, or Catwalk Overwatch */
+        /* Role 4 on 7x7 Cruiser: Guarding UFO Main Reactor & Stasis Deck */
+        else if (a == 4 && g_ufo_sz == 7 && g_ufo_rect.valid) {
+            for (tries = 0; tries < 50 && !found; tries++) {
+                int rx = rrange(1, g_ufo_sz - 2);
+                int ry = rrange(2, g_ufo_sz - 2);
+                int tx, ty;
+                ufo_rot_xy(g_ufo_rect.x0, g_ufo_rect.y0, g_ufo_sz, g_ufo_door_side, rx, ry, &tx, &ty);
+                if (tile_free_for_spawn(tx, ty, 0, plan, a) && !any_squad_has_los(tx, ty, 0, plan)) {
+                    ax = tx; ay = ty; az = 0; found = 1;
+                }
+            }
+        }
+        /* Role 1: Elevated z=1 Rooftop, Saucer Dome, Hayloft, or Catwalk Overwatch */
         else if (a == 1) {
-            for (tries = 0; tries < 90 && !found; tries++) {
-                int tx = rrange(2, 21), ty = rrange(2, 21);
+            for (tries = 0; tries < 140 && !found; tries++) {
+                int tx = rrange(2, LOT_MAX_X), ty = rrange(2, LOT_MAX_Y);
                 if (tile_free_for_spawn(tx, ty, 1, plan, a) &&
-                    min_squad_dist(tx, ty, plan) >= 10 &&
+                    min_squad_dist(tx, ty, plan) >= 16 &&
                     !any_squad_has_los(tx, ty, 1, plan)) {
                     ax = tx; ay = ty; az = 1; found = 1;
                 }
             }
         }
-        /* Role 2: Inside a Diner / Arcade / Barn / House / Steel Tower */
-        else if (a == 2 && g_num_bldgs > 0) {
-            for (tries = 0; tries < 70 && !found; tries++) {
+        /* Roles 2 & 3: Inside Separate Diners / Arcades / Barns / Houses / Cornfields / Steel Towers */
+        else if ((a == 2 || a == 3) && g_num_bldgs > 0) {
+            for (tries = 0; tries < 100 && !found; tries++) {
                 BldgRect b = g_bldgs[rand() % g_num_bldgs];
                 int tx = rrange(b.x0, b.x1), ty = rrange(b.y0, b.y1);
                 if (tile_free_for_spawn(tx, ty, 0, plan, a) &&
-                    min_squad_dist(tx, ty, plan) >= 9 &&
+                    min_squad_dist(tx, ty, plan) >= 14 &&
+                    (tries >= 70 || min_other_alien_dist(tx, ty, plan, a) >= 7) &&
                     !any_squad_has_los(tx, ty, 0, plan)) {
                     ax = tx; ay = ty; az = 0; found = 1;
                 }
             }
         }
 
-        /* General Flanking Patrol / Fallback Placement (no Turn-1 spawn-camp LOS!) */
-        for (tries = 0; tries < 150 && !found; tries++) {
-            int tx = rrange(1, 22), ty = rrange(1, 22);
+        /* General Flanking Patrol / Dispersed Sector Placement (no Turn-1 spawn-camp LOS!) */
+        for (tries = 0; tries < 200 && !found; tries++) {
+            int tx = rrange(1, MAP_W - 2), ty = rrange(1, MAP_H - 2);
             if (zone_map[ty][tx] == ZONE_LZ) continue;
             if (!tile_free_for_spawn(tx, ty, 0, plan, a)) continue;
-            if (min_squad_dist(tx, ty, plan) < (tries < 100 ? 11 : 7)) continue;
-            if (tries < 110 && any_squad_has_los(tx, ty, 0, plan)) continue;
+            if (min_squad_dist(tx, ty, plan) < (tries < 130 ? 16 : 10)) continue;
+            if (tries < 120 && min_other_alien_dist(tx, ty, plan, a) < 6) continue;
+            if (tries < 160 && any_squad_has_los(tx, ty, 0, plan)) continue;
             ax = tx; ay = ty; az = 0; found = 1;
         }
 
         /* Deterministic safety scan so a unit is NEVER placed on a blocked tile */
         if (!found) {
             int tx, ty, best_d = -1;
-            for (ty = 1; ty <= 22; ty++) {
-                for (tx = 1; tx <= 22; tx++) {
+            for (ty = 1; ty <= MAP_H - 2; ty++) {
+                for (tx = 1; tx <= MAP_W - 2; tx++) {
                     if (tile_free_for_spawn(tx, ty, 0, plan, a)) {
                         int d = min_squad_dist(tx, ty, plan);
                         if (d > best_d) {
@@ -1272,7 +1744,7 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
         plan->alien_x[a]    = ax;
         plan->alien_y[a]    = ay;
         plan->alien_z[a]    = az;
-        plan->alien_dir[a]  = calc_dir_vec(plan->squad_x[0] - ax, plan->squad_y[0] - ay);
+        plan->alien_dir[a]  = calc_dir_vec((MAP_W / 2) - ax, (MAP_H / 2) - ay);
     }
 }
 

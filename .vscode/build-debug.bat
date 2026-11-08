@@ -12,7 +12,7 @@ if not exist "%~dp0..\build\assets" mkdir "%~dp0..\build\assets"
 "%DOS_DIR%\djgpp\bin\i586-pc-msdosdjgpp-gcc.exe" -g -Wall -std=gnu99 ^
     -I"%DOS_DIR%\djgpp\i586-pc-msdosdjgpp\sys-include" ^
     "%~dp0..\src\main.c" "%~dp0..\src\vga.c" "%~dp0..\src\input.c" "%~dp0..\src\sound.c" "%~dp0..\src\music.c" "%~dp0..\src\settings.c" ^
-    "%~dp0..\src\bmp_loader.c" "%~dp0..\src\gfx_assets.c" "%~dp0..\src\pathfind.c" "%~dp0..\src\procgen.c" "%~dp0..\src\isomap.c" "%~dp0..\src\hud.c" "%~dp0..\src\campaign.c" ^
+    "%~dp0..\src\bmp_loader.c" "%~dp0..\src\gfx_assets.c" "%~dp0..\src\operative.c" "%~dp0..\src\pathfind.c" "%~dp0..\src\procgen.c" "%~dp0..\src\isomap.c" "%~dp0..\src\hud.c" "%~dp0..\src\campaign.c" ^
     -lm -o "%~dp0..\build\main.exe"
 
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%

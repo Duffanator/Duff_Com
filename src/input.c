@@ -77,6 +77,22 @@ void input_poll(void) {
 #endif
 }
 
+void input_flush(void) {
+#ifdef __DJGPP__
+    while (kbhit()) {
+        int ch = getch();
+        if (ch == 0 || ch == 0xE0) {
+            if (kbhit()) (void)getch();
+        }
+    }
+#endif
+    input_poll();
+    g_input.left_clicked  = 0;
+    g_input.right_clicked = 0;
+    g_input.last_key      = 0;
+    g_input.prev_buttons  = g_input.buttons;
+}
+
 /* Classic X-COM angled tactical pointer with high-contrast outline */
 static const uint8_t cursor_bmp[9 * 9] = {
     96, 96, 15,255,255,255,255,255,255,

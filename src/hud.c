@@ -2,6 +2,7 @@
 #include "vga.h"
 #include "gfx_assets.h"
 #include "isomap.h"
+#include "operative.h"
 #include "input.h"
 #include "sound.h"
 #include "settings.h"
@@ -105,7 +106,8 @@ void hud_render(void) {
 
     /* 3. Center Soldier Name & Stat Bars (TU, HP, EN) */
     vga_rect_bevel(90, 156, 111, 38, 169, 172, 163);
-    vga_print_shadow(93, 158, u->name, 96, 15);
+    operative_draw_rank_badge(93, 158, u->rank);
+    vga_print_shadow(104, 158, u->name, 96, 15);
 
     draw_stat_bar(93, 167, "TU", u->tu,     u->tu_max,     18);  /* Bright Green TU */
     draw_stat_bar(93, 175, "HP", u->hp,     u->hp_max,     33);  /* Bright Red Health */

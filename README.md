@@ -12,7 +12,7 @@ Command an underground defense bunker beneath Coopersburg, Pennsylvania, track U
 Between missions, manage the defense of Eastern Pennsylvania across three interactive HQ screens:
 - **Valley Radar (`1. VALLEY RADAR`)**: Full-width sweeping CRT radar centered on Coopersburg, PA (spanning PA Route 309, I-78, I-476, Saucon Creek, and Lake Nockamixon). Monitor real-time Crash Sites, Landed UFOs, and Alien Terror Raids across 16 real-world Lehigh Valley locations with a live campaign clock and Day/Night mission deployment.
 - **Coopersburg Underground Bunker (`2. BUNKER BASE`)**: Expand a `3x4` subterranean base grid using recovered **Alien Alloys** and **Elerium-115**. Facilities include the Access Lift, Skyranger Hangar, Radar Array, Duff's Underground Arcade Rec Room, Laser Lab, Medbay (`+HP` squad bonus), Plasma Lab, and Defense Turrets.
-- **Squad Armory (`3. SQUAD ARMORY`)**: Inspect your 5 operatives, track individual kill counts, cycle operative portraits/genders, and equip **Assault Rifles**, **Coopersburg Prototype Laser Rifles**, and **Heavy Elerium Plasma Rifles**.
+- **Squad Armory (`3. SQUAD ARMORY`)**: Inspect your 5 operatives' ranks (**Rookie** → **Squaddie** → **Sergeant** → **Captain** → **Colonel** → **Commander**), XP progress bars, combat stats (`TU`, `HP`, `AIM`, `RCN`), and career kills/missions. Cycle operative portraits/genders and equip **Assault Rifles**, **Coopersburg Prototype Laser Rifles**, and **Heavy Elerium Plasma Rifles**. Operatives earn XP from combat hits, alien kills, and surviving missions; fallen (KIA) operatives suffer permadeath and are replaced by fresh Rookies from HQ's recruit pool.
 
 ### 2. Isometric Tactical Battlescape
 Deploy into `24x24` multi-elevation (`3`-story) procedurally generated isometric combat zones across **4 local Pennsylvania biomes**:
@@ -75,7 +75,7 @@ Deploy into `24x24` multi-elevation (`3`-story) procedurally generated isometric
 
 ## Customization
 
-- **[`ROSTER.CFG`](ROSTER.CFG)**: Edit the 5 lines in `ROSTER.CFG` to customize your starting squad's names. Optional `M:` or `F:` prefixes (e.g., `F: SGT. DECKER`) lock an operative's gender and portrait pool.
+- **[`ROSTER.CFG`](ROSTER.CFG)**: Edit the 5 lines in `ROSTER.CFG` to customize your starting squad's names (all operatives begin as Rookies and earn rank prefixes in combat). Optional `M:` or `F:` prefixes (e.g., `F: DECKER`) lock an operative's gender and portrait pool.
 - **[`SETTINGS.CFG`](SETTINGS.CFG)**: Stores persistent preferences (also editable from the in-game `OPT` menu) for animation speed (`ANIM_SPEED`), OPL2 music volume (`MUSIC_VOL`), Sound Blaster SFX (`SFX`), and trackball edge-scroll speed (`SCROLL_SPEED`).
 
 ---
@@ -109,6 +109,7 @@ Duff_Com/
 ├── src/                  # C99 MS-DOS engine & gameplay source code
 │   ├── main.c            # Game loop, title screen & arcade input dispatch
 │   ├── campaign.c/.h     # Lehigh Valley CRT radar, bunker base & armory
+│   ├── operative.c/.h    # X-COM rank progression, XP, stats & recruit pool
 │   ├── isomap.c/.h       # Isometric renderer, raycast combat, LOS, lighting & AI
 │   ├── procgen.c/.h      # Procedural generator for all 4 PA combat biomes
 │   ├── pathfind.c/.h     # 3D multi-elevation A* pathfinding

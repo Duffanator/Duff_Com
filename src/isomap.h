@@ -4,8 +4,8 @@
 #include <stdint.h>
 #include "pathfind.h"
 
-#define MAP_W    24
-#define MAP_H    24
+#define MAP_W    34
+#define MAP_H    34
 #define MAP_LEVS 3
 
 #define MAX_UNITS 16
@@ -33,8 +33,8 @@ typedef struct {
     uint8_t obj_id;
     uint8_t light;      /* 0 (brightest) .. 15 (darkest) */
     uint8_t fog;        /* FOG_UNSEEN, FOG_SEEN, FOG_VISIBLE */
-    uint8_t smoke;      /* 0..5 billowing smoke turns */
-    uint8_t fire;       /* 0..4 active fire turns */
+    uint8_t smoke;      /* Remaining turns of animated smoke (0 = clear, 1..7 = wisp to heavy plume) */
+    uint8_t fire;       /* Remaining turns of active fire (0 = out, 1..4 = burning) */
     int8_t  unit_idx;   /* -1 if empty, else index in g_units[] */
 } MapCell;
 
@@ -65,6 +65,9 @@ typedef struct {
     int firing_acc;     /* Base firing accuracy % */
     int reactions;      /* Reaction Fire initiative stat */
     int kills;
+    int rank;           /* Operative rank (RANK_ROOKIE..RANK_COMMANDER) */
+    int xp_start;       /* Career XP at mission start (for debrief preview) */
+    int xp_gained;      /* Combat XP earned from hits & kills this mission */
 } Unit;
 
 typedef struct {
@@ -87,8 +90,13 @@ typedef struct {
     int aliens_killed;
     int elerium_recovered;
     int alloys_recovered;
+    int nav_recovered;      /* Intact Alien Navigation / Flight Computers recovered */
+    int cryo_recovered;     /* Intact Alien Cryo-Stasis Bio-Chambers recovered */
+    int pods_recovered;     /* Intact Alien Tech / Ordnance Pods recovered */
+    int corpses_recovered;  /* Alien bodies recovered for future autopsy research */
     char status_msg[48];    /* Tactical ticker message on HUD */
     int status_timer;
+    uint32_t anim_tick;     /* 70 Hz real-time frame counter for animated smoke & fire */
 } BattleState;
 
 extern MapCell g_map[MAP_LEVS][MAP_H][MAP_W];
@@ -110,12 +118,19 @@ void isomap_tile_to_screen(int tx, int ty, int tz, int *sx, int *sy);
 void isomap_screen_to_tile(int sx, int sy, int tz, int *tx, int *ty);
 void isomap_center_camera_on(int tx, int ty, int tz);
 
-/* Wall Material Properties & Structural Hit Points */
+/* Wall Material Properties, Multi-Tile Vehicle Helpers & Structural Hit Points */
 uint8_t     isomap_wall_max_hp(uint8_t wall_id);
 int         isomap_wall_blocks_move(uint8_t wall_id);
 int         isomap_wall_blocks_los(uint8_t wall_id);
+int         isomap_is_door_closed(uint8_t wall_id);
+int         isomap_is_door_open(uint8_t wall_id);
+int         isomap_is_lift_obj(uint8_t obj_id);
+int         isomap_is_ufo_corner_obj(uint8_t obj_id);
 const char *isomap_wall_name(uint8_t wall_id);
 void        isomap_init_wall_hp(void);
+int         isomap_is_vehicle_obj(uint8_t obj_id);
+int         isomap_get_vehicle_partner(int x, int y, int z, int *out_px, int *out_py);
+void        isomap_clear_prop_at(int z, int y, int x, uint8_t new_obj, uint8_t min_smoke);
 
 /* Tactical actions */
 int  isomap_has_los(int x0, int y0, int z0, int x1, int y1, int z1);
@@ -129,5 +144,7 @@ void isomap_end_turn(void);
 /* Rendering */
 int  isomap_get_cursor_mode(void);
 void isomap_render(void);
+void isomap_draw_hidden_screen(void);
+void isomap_draw_turn_splash(void);
 
 #endif /* ISOMAP_H */

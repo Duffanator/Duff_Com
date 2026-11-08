@@ -69,6 +69,8 @@ int main(int argc, char **argv) {
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-snap") == 0 || strcmp(argv[i], "--snap") == 0) {
             snap_mode = 1;
+        } else if (strcmp(argv[i], "-snap-splash") == 0 || strcmp(argv[i], "--snap-splash") == 0) {
+            snap_mode = 2;
         }
     }
 
@@ -85,15 +87,26 @@ int main(int argc, char **argv) {
     music_init();
     music_set_volume(g_settings.music_vol);
     input_init();
-    isomap_init();
     campaign_init();
+    isomap_init();
+    campaign_sync_squad_units();
 
     if (snap_mode) {
-        isomap_render();
-        hud_render();
-        input_draw_cursor();
-        vga_flip();
-        vga_save_bmp("SNAP.BMP");
+        if (snap_mode == 2) {
+            isomap_draw_hidden_screen();
+            vga_flip();
+            vga_save_bmp("SNAP_HID.BMP");
+            g_battle.turn_number = 2;
+            isomap_draw_turn_splash();
+            vga_flip();
+            vga_save_bmp("SNAP_TRN.BMP");
+        } else {
+            isomap_render();
+            hud_render();
+            input_draw_cursor();
+            vga_flip();
+            vga_save_bmp("SNAP.BMP");
+        }
         music_shutdown();
         sound_shutdown();
         vga_shutdown();
@@ -311,6 +324,7 @@ int main(int argc, char **argv) {
                 break;
             }
             case KEY_ENTER:
+                scroll_timer = 0;
                 isomap_end_turn();
                 break;
             case 'p':

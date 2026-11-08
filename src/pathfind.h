@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define MAX_PATH_LEN 64
+#define MAX_PATH_LEN 160
 
 typedef struct {
     int8_t x, y, z;
