@@ -1,4 +1,5 @@
 #include "operative.h"
+#include "items.h"
 #include "vga.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -45,6 +46,7 @@ static const int rank_xp_reqs[RANK_COUNT] = {
 /* Permanent stat increases granted upon promotion into Rank r (1..5) */
 static const int rank_gain_tu[RANK_COUNT]  = { 0, 4, 4, 5, 5, 6 }; /* +24 TU total  */
 static const int rank_gain_aim[RANK_COUNT] = { 0, 6, 6, 6, 6, 6 }; /* +30 AIM total */
+static const int rank_gain_thr[RANK_COUNT] = { 0, 5, 5, 5, 5, 6 }; /* +26 THR total */
 static const int rank_gain_hp[RANK_COUNT]  = { 0, 4, 4, 5, 5, 7 }; /* +25 HP total  */
 static const int rank_gain_en[RANK_COUNT]  = { 0, 5, 5, 5, 6, 8 }; /* +29 EN total  */
 static const int rank_gain_rcn[RANK_COUNT] = { 0, 6, 6, 7, 7, 9 }; /* +35 RCN total */
@@ -57,7 +59,15 @@ static const char *default_starting_names[MAX_SQUAD_SIZE] = {
     "BARBER"
 };
 
-/* Pool of 44 classic X-COM / Pennsylvania / 90s sci-fi operative surnames (all <= 9 chars) */
+static const int default_starting_genders[MAX_SQUAD_SIZE] = {
+    0,  /* KELLER: Male   */
+    1,  /* DECKER: Female */
+    0,  /* HARR:   Male   */
+    0,  /* LUCAS:  Male   */
+    0   /* BARBER: Male   */
+};
+
+/* Expanded pool of 125 classic X-COM / Pennsylvania / 90s sci-fi operative surnames (all <= 9 chars) */
 static const char *recruit_name_pool[] = {
     "VASQUEZ",   "HUDSON",    "HICKS",     "RIPLEY",    "BISHOP",
     "DRAKE",     "APONE",     "FROST",     "DIETRICH",  "FERRO",
@@ -67,8 +77,25 @@ static const char *recruit_name_pool[] = {
     "DELGADO",   "MORALES",   "TANAKA",    "SATO",      "CHEN",
     "VOLKOV",    "SOKOLOV",   "LINDQVIST", "BERGER",    "HOFFMAN",
     "WAGNER",    "STEELE",    "HAWKE",     "ROURKE",    "BOONE",
-    "CARTER",    "REYES",     "FOSTER",    "HAYES"
+    "CARTER",    "REYES",     "FOSTER",    "HAYES",     "GORMAN",
+    "CROWE",     "WIERZBOWSKI","SPUNKMEYER","BURKE",    "NEWMAN",
+    "YODER",     "KAUFFMAN",  "LANDIS",    "DETWEILER", "MOYER",
+    "STAUFFER",  "FRETZ",     "BEIDLER",   "SHULER",    "GEISSINGER",
+    "KRAUSS",    "KLINE",     "WEAVER",    "HELLER",    "BACHMAN",
+    "HARTMAN",   "REINHARD",  "SCHAEFFER", "DIEHL",     "ROTH",
+    "TROXELL",   "TREXLER",   "FENSTER",   "DEIBERT",   "ZIEGLER",
+    "METZGER",   "LUTZ",      "WERNER",    "BECKER",    "FISCHER",
+    "WEBER",     "RICHTER",   "KLEIN",     "WOLF",      "NEUMANN",
+    "SCHWARZ",   "BRAUN",     "KRUEGER",   "KOCH",      "LEHMANN",
+    "O'CONNOR",  "SULLIVAN",  "MURPHY",    "WALSH",     "MCBRIDE",
+    "DONOVAN",   "QUINN",     "DOYLE",     "NOLAN",     "PHELAN",
+    "ROSSI",     "CONTI",     "GRECO",     "MARINO",    "LOMBARDI",
+    "NAKAMURA",  "KOBAYASHI", "YAMAMOTO",  "TAKAHASHI", "WATANABE",
+    "LIN",       "HUANG",     "ZHAO",      "CHOI",      "PARK",
+    "ORLOV",     "PETROV",    "IVANOV",    "KOZLOV",    "MOROZOV",
+    "SLADE",     "DECKARD",   "MACREADY",  "CHILDS",    "PLISSKEN"
 };
+
 
 #define NUM_RECRUIT_NAMES (int)(sizeof(recruit_name_pool) / sizeof(recruit_name_pool[0]))
 
@@ -182,7 +209,13 @@ void operative_init_rookie(Operative *op, const char *raw_name,
     op->active = 1;
     op->gender = gender ? 1 : 0;
     op->portrait_id = portrait_id;
-    op->weapon_id = weapon_id % 3;
+    /* Default starting weapon is always a researched human ballistic weapon */
+    op->weapon_id   = (weapon_id >= 0 && item_is_weapon(weapon_id)) ? weapon_id : ITEM_ASSAULT_RIFLE;
+    op->sidearm_id  = ITEM_PISTOL;
+    op->extra_clips = 2;
+    op->grenade_id  = ITEM_FRAG_GRENADE;
+    op->grenades    = 2;
+    op->flares      = 2;
     op->rank = RANK_ROOKIE;
     op->xp = 0;
     op->kills = 0;
@@ -206,6 +239,7 @@ void operative_init_rookie(Operative *op, const char *raw_name,
     op->hp_max     = 40 + (rand() % 4); /* 40..43 Base HP (55..58 with HQ Medbay)          */
     op->energy_max = 55 + (rand() % 4); /* 55..58 Stamina                                  */
     op->firing_acc = 56 + (rand() % 4); /* 56..59% Base Aim                                */
+    op->throw_acc  = 54 + (rand() % 6); /* 54..59% Base Throwing Accuracy                  */
     op->reactions  = 44 + (rand() % 5); /* 44..48 Reaction Initiative                      */
 }
 
@@ -218,32 +252,25 @@ int operative_add_xp(Operative *op, int xp_gain) {
         op->rank++;
         op->tu_max     += rank_gain_tu[op->rank];
         op->firing_acc += rank_gain_aim[op->rank];
+        op->throw_acc  += rank_gain_thr[op->rank];
         op->hp_max     += rank_gain_hp[op->rank];
         op->energy_max += rank_gain_en[op->rank];
         op->reactions  += rank_gain_rcn[op->rank];
         if (op->firing_acc > 99) op->firing_acc = 99;
+        if (op->throw_acc  > 99) op->throw_acc  = 99;
         promotions++;
     }
     return promotions;
 }
 
 void operative_load_starting_squad(Operative *squad, int squad_count) {
-    static const int start_weapons[MAX_SQUAD_SIZE] = { 1, 0, 2, 0, 1 };
     int male_pool[6] = { 0, 1, 2, 3, 4, 5 };
     int fem_pool[6]  = { 6, 7, 8, 9, 10, 11 };
-    int genders[MAX_SQUAD_SIZE] = { 0, 1, 0, 1, 0 };
-    char cfg_names[MAX_SQUAD_SIZE][OP_NAME_LEN];
-    int gender_locked[MAX_SQUAD_SIZE] = { 0, 0, 0, 0, 0 };
     int m_idx = 0, f_idx = 0, i;
-    FILE *fp;
 
     if (!squad || squad_count <= 0) return;
 
-    genders[4] = rand() & 1;
-    for (i = MAX_SQUAD_SIZE - 1; i > 0; i--) {
-        int j = rand() % (i + 1);
-        int tmp = genders[i]; genders[i] = genders[j]; genders[j] = tmp;
-    }
+    /* Shuffle male & female portrait pools so each new game gives random gender-matched faces */
     for (i = 5; i > 0; i--) {
         int jm = rand() % (i + 1);
         int jf = rand() % (i + 1);
@@ -251,47 +278,21 @@ void operative_load_starting_squad(Operative *squad, int squad_count) {
         int tf = fem_pool[i];  fem_pool[i]  = fem_pool[jf];  fem_pool[jf]  = tf;
     }
 
+    /* Starting operatives at the start of a new game are ALWAYS:
+     * 0: KELLER (Male, random male face)
+     * 1: DECKER (Female, random female face)
+     * 2: HARR   (Male, random male face)
+     * 3: LUCAS  (Male, random male face)
+     * 4: BARBER (Male, random male face)
+     * And all start with human Assault Rifles, Pistols & Frag Grenades! */
     for (i = 0; i < squad_count; i++) {
-        const char *def_n = (i < MAX_SQUAD_SIZE) ? default_starting_names[i] : "RECRUIT";
-        strncpy(cfg_names[i], def_n, OP_NAME_LEN - 1);
-        cfg_names[i][OP_NAME_LEN - 1] = '\0';
-    }
-
-    fp = fopen("ROSTER.CFG", "r");
-    if (!fp) fp = fopen("assets/ROSTER.CFG", "r");
-    if (fp) {
-        int slot = 0;
-        char line[64];
-        while (slot < squad_count && slot < MAX_SQUAD_SIZE && fgets(line, sizeof(line), fp)) {
-            char *p = line;
-            char *nl = strpbrk(line, "\r\n");
-            if (nl) *nl = '\0';
-            while (*p == ' ' || *p == '\t') p++;
-            if (*p == '#' || *p == '\0') continue;
-
-            if ((p[0] == 'M' || p[0] == 'm' || p[0] == 'F' || p[0] == 'f') &&
-                (p[1] == ':' || p[1] == ',')) {
-                genders[slot] = (p[0] == 'F' || p[0] == 'f') ? 1 : 0;
-                gender_locked[slot] = 1;
-                p += 2;
-                while (*p == ' ' || *p == '\t') p++;
-            }
-            (void)gender_locked;
-
-            strncpy(cfg_names[slot], operative_strip_rank_prefix(p), OP_NAME_LEN - 1);
-            cfg_names[slot][OP_NAME_LEN - 1] = '\0';
-            slot++;
-        }
-        fclose(fp);
-    }
-
-    for (i = 0; i < squad_count; i++) {
-        int g = genders[i % MAX_SQUAD_SIZE];
+        int idx  = i % MAX_SQUAD_SIZE;
+        int g    = default_starting_genders[idx];
         int port = (g == 0) ? male_pool[m_idx++ % 6] : fem_pool[f_idx++ % 6];
-        int wep  = start_weapons[i % MAX_SQUAD_SIZE];
-        operative_init_rookie(&squad[i], cfg_names[i % MAX_SQUAD_SIZE], g, port, wep);
+        operative_init_rookie(&squad[i], default_starting_names[idx], g, port, ITEM_ASSAULT_RIFLE);
     }
 }
+
 
 static int name_in_use(const char *cand,
                        const Operative *squad, int squad_count,
@@ -340,9 +341,41 @@ static void generate_single_recruit(Operative *out_op,
             break;
         }
     }
-    /* Newly hired / replacement Rookies issue standard Assault Rifle (weapon_id = 0) */
-    operative_init_rookie(out_op, chosen_name, gender, port, 0);
+    /* Newly hired / replacement Rookies issue standard Assault Rifle */
+    operative_init_rookie(out_op, chosen_name, gender, port, ITEM_ASSAULT_RIFLE);
 }
+
+void operative_record_memorial(MemorialEntry *memorial, int max_entries,
+                               const Operative *fallen, int day_kia, const char *cause) {
+    int i, slot = -1;
+    if (!memorial || max_entries <= 0 || !fallen) return;
+
+    for (i = 0; i < max_entries; i++) {
+        if (!memorial[i].active) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        /* Shift oldest entry out if memorial is full */
+        for (i = 0; i < max_entries - 1; i++) {
+            memorial[i] = memorial[i + 1];
+        }
+        slot = max_entries - 1;
+    }
+
+    memset(&memorial[slot], 0, sizeof(MemorialEntry));
+    memorial[slot].active = 1;
+    strncpy(memorial[slot].name, fallen->name, OP_NAME_LEN - 1);
+    memorial[slot].rank        = fallen->rank;
+    memorial[slot].gender      = fallen->gender;
+    memorial[slot].portrait_id = fallen->portrait_id;
+    memorial[slot].kills       = fallen->kills;
+    memorial[slot].missions    = fallen->missions;
+    memorial[slot].day_kia     = (day_kia > 0) ? day_kia : 1;
+    strncpy(memorial[slot].cause, cause ? cause : "KIA IN ACTION", sizeof(memorial[slot].cause) - 1);
+}
+
 
 void operative_refresh_recruit_pool(Operative *pool, int pool_count,
                                     const Operative *squad, int squad_count) {

@@ -2729,5 +2729,7 @@ if ($ObjectsOnly) {
     Write-Output "Generated assets/OBJECTS.BMP!"
 } else {
     [DuffArtGen]::GenerateAll((Resolve-Path "assets").Path)
+    & (Join-Path $PSScriptRoot "gen_new_assets.ps1")
     Write-Output "Generated BMP sprite sheets in assets/!"
 }
+

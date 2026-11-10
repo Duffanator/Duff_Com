@@ -1,5 +1,7 @@
 #include "settings.h"
+#include "campaign.h"
 #include "vga.h"
+
 #include "input.h"
 #include "sound.h"
 #include "music.h"
@@ -171,20 +173,23 @@ void settings_render_modal(int in_battlescape) {
     draw_opt_pill(198, 90, 84, 20, "ON",  g_settings.sfx_enabled == 1, 0);
 
     /* Row 3: TRACKBALL EDGE SCROLL SPEED (SLOW / NORM / FAST) */
-    vga_print_shadow(38, 121, "MAP SCROLL:", (opt_sel_row == 3) ? 96 : 80, 15);
-    draw_opt_pill(110, 115, 54, 20, "SLOW", g_settings.scroll_speed == 0, 0);
-    draw_opt_pill(168, 115, 58, 20, "NORM", g_settings.scroll_speed == 1, 0);
-    draw_opt_pill(230, 115, 52, 20, "FAST", g_settings.scroll_speed == 2, 0);
+    vga_print_shadow(38, 117, "MAP SCROLL:", (opt_sel_row == 3) ? 96 : 80, 15);
+    draw_opt_pill(110, 112, 54, 18, "SLOW", g_settings.scroll_speed == 0, 0);
+    draw_opt_pill(168, 112, 58, 18, "NORM", g_settings.scroll_speed == 1, 0);
+    draw_opt_pill(230, 112, 52, 18, "FAST", g_settings.scroll_speed == 2, 0);
 
-    vga_hline(36, 284, 141, 66);
+    /* Row 4: SAVE GAME & LOAD GAME (DUFFSAVE.SAV) */
+    draw_opt_pill(38,  134, 118, 18, "SAVE GAME", 0, 0);
+    draw_opt_pill(164, 134, 118, 18, "LOAD GAME", 0, 0);
 
-    /* Row 4: RESUME GAME & ABORT MISSION / QUIT TO DOS */
-    draw_opt_pill(38,  147, 118, 24, "RESUME GAME",
+    /* Row 5: RESUME GAME & ABORT MISSION / QUIT TO DOS */
+    draw_opt_pill(38,  156, 118, 20, "RESUME GAME",
                   (opt_sel_row == 4 && opt_sel_btn == 0), 0);
-    draw_opt_pill(164, 147, 118, 24,
+    draw_opt_pill(164, 156, 118, 20,
                   in_battlescape ? "ABORT TO HQ" : "QUIT TO DOS",
                   (opt_sel_row == 4 && opt_sel_btn == 1), 1);
 }
+
 
 int settings_handle_input(int in_battlescape) {
     int mx = g_input.mx;
@@ -299,7 +304,7 @@ int settings_handle_input(int in_battlescape) {
     }
 
     /* Row 3: MAP SCROLL */
-    if (my >= 115 && my < 135) {
+    if (my >= 112 && my < 131) {
         opt_sel_row = 3;
         if (mx >= 110 && mx < 164)      g_settings.scroll_speed = 0;
         else if (mx >= 168 && mx < 226) g_settings.scroll_speed = 1;
@@ -310,8 +315,27 @@ int settings_handle_input(int in_battlescape) {
         return 0;
     }
 
-    /* Row 4: RESUME / ABORT OR QUIT */
-    if (my >= 147 && my < 171) {
+    /* Row 4: SAVE GAME / LOAD GAME */
+    if (my >= 134 && my < 153) {
+        if (mx >= 38 && mx < 156) {
+            campaign_save_game("DUFFSAVE.SAV");
+            g_settings.menu_open = 0;
+            sfx_beep(660, 60);
+            return 0;
+        }
+        if (mx >= 164 && mx < 282) {
+            if (campaign_load_game("DUFFSAVE.SAV")) {
+                g_settings.menu_open = 0;
+                sfx_beep(784, 70);
+            } else {
+                sfx_beep(200, 60);
+            }
+            return 0;
+        }
+    }
+
+    /* Row 5: RESUME / ABORT OR QUIT */
+    if (my >= 156 && my < 178) {
         opt_sel_row = 4;
         if (mx >= 38 && mx < 156) {
             opt_sel_btn = 0;
@@ -326,6 +350,7 @@ int settings_handle_input(int in_battlescape) {
             return in_battlescape ? 1 : 2;
         }
     }
+
 
     return 0;
 }

@@ -5,8 +5,10 @@ typedef struct {
     int squad_x[5];
     int squad_y[5];
     int squad_dir;
+    int bus_x0, bus_y0, bus_x1, bus_y1;
 
     int num_aliens;
+
     int alien_type[8]; /* 1 = Sectoid, 2 = Floater, 3 = Muton */
     int alien_x[8];
     int alien_y[8];

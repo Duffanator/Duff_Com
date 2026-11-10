@@ -17,12 +17,14 @@
 
 /* Local Lehigh Valley / Coopersburg Map Biomes */
 enum {
-    BIOME_RTE309 = 0,   /* Route 309 Diner & Duff's Arcade */
-    BIOME_PA_FARM,      /* Pennsylvania Farmland & Red Barn */
-    BIOME_SUBURB,       /* Coopersburg Neighborhood & Arcade Basement */
-    BIOME_STEEL,        /* Bethlehem Steel Industrial Ruins */
+    BIOME_RTE309 = 0,       /* Route 309 Diner & Duff's Arcade */
+    BIOME_PA_FARM,          /* Pennsylvania Farmland & Red Barn */
+    BIOME_SUBURB,           /* Coopersburg Neighborhood & Arcade Basement */
+    BIOME_STEEL,            /* Bethlehem Steel Industrial Ruins */
+    BIOME_BASE_DEFENSE,     /* Special Mission: Duff-COM Colonial House Home Base Defense! */
     BIOME_COUNT
 };
+
 
 typedef struct {
     uint8_t floor_id;
@@ -31,12 +33,14 @@ typedef struct {
     uint8_t wall_west_hp;   /* Structural HP of wall_west (0 = destroyed / WALL_NONE) */
     uint8_t wall_north_hp;  /* Structural HP of wall_north (0 = destroyed / WALL_NONE) */
     uint8_t obj_id;
-    uint8_t light;      /* 0 (brightest) .. 15 (darkest) */
-    uint8_t fog;        /* FOG_UNSEEN, FOG_SEEN, FOG_VISIBLE */
-    uint8_t smoke;      /* Remaining turns of animated smoke (0 = clear, 1..7 = wisp to heavy plume) */
-    uint8_t fire;       /* Remaining turns of active fire (0 = out, 1..4 = burning) */
-    int8_t  unit_idx;   /* -1 if empty, else index in g_units[] */
+    uint8_t light;          /* 0 (brightest) .. 15 (darkest) */
+    uint8_t fog;            /* FOG_UNSEEN, FOG_SEEN, FOG_VISIBLE */
+    uint8_t smoke;          /* Remaining turns of animated smoke (0 = clear, 1..7 = wisp to heavy plume) */
+    uint8_t fire;           /* Remaining turns of active fire (0 = out, 1..4 = burning) */
+    int8_t  unit_idx;       /* -1 if empty, else index in g_units[] */
+    int8_t  gnd_item[4];    /* Persistent items laying on ground (-1 = empty, 0..ITEM_COUNT-1) */
 } MapCell;
+
 
 typedef struct {
     int active;
@@ -46,8 +50,11 @@ typedef struct {
     int gender;         /* 0 = Male, 1 = Female */
     char name[20];
     int portrait_id;    /* 0..5 Male portraits, 6..11 Female portraits */
-    int weapon_id;      /* 0 = Assault Rifle, 1 = Laser Rifle, 2 = Plasma Rifle */
-    int ammo;
+    int weapon_id;      /* ITEM_* primary weapon ID (or legacy 0..2 class) */
+    int sidearm_id;     /* ITEM_* secondary weapon ID */
+    int ammo;           /* Rounds remaining in current magazine/battery/cartridge */
+    int extra_clips;    /* Spare magazines/batteries/cartridges carried */
+    int grenade_id;     /* ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE, or ITEM_ALIEN_GRENADE */
     int grenades;       /* High-Explosive grenades remaining */
     int flares;         /* Night Electro-Flares remaining */
     int x, y, z;        /* Map tile coordinates */
@@ -63,12 +70,14 @@ typedef struct {
     int energy, energy_max;
     int morale;
     int firing_acc;     /* Base firing accuracy % */
+    int throw_acc;      /* Base throwing accuracy % */
     int reactions;      /* Reaction Fire initiative stat */
     int kills;
     int rank;           /* Operative rank (RANK_ROOKIE..RANK_COMMANDER) */
     int xp_start;       /* Career XP at mission start (for debrief preview) */
     int xp_gained;      /* Combat XP earned from hits & kills this mission */
 } Unit;
+
 
 typedef struct {
     int cam_x, cam_y;       /* Screen pixel offset of tile (0,0,0) top-left */
@@ -79,9 +88,20 @@ typedef struct {
     int roof_cutaway;       /* 1 = Hide roofs/upper levels above view_level or cursor */
     int night_mode;         /* 0 = Daytime Coopersburg, 1 = Night Mission lighting */
     int reserve_mode;       /* 0 = Free Move, 1 = Reserve Snap (12 TU), 2 = Reserve Aimed (20 TU) */
-    int fire_mode;          /* 0 = Move, 1 = Snap, 2 = Aimed, 3 = Auto, 4 = HE Grenade, 5 = Flare */
+    int fire_mode;          /* 0 = Move, 1 = Snap, 2 = Aimed, 3 = Auto, 4 = Grenade, 5 = Flare, 6 = Throw Item */
+    int throw_item_id;      /* ITEM_* queued to be thrown when fire_mode == 6 */
     int weapon_menu_open;   /* 1 = Popup firing mode selector open above HUD */
+    int pre_mission_equip;  /* 1 = Pre-Mission ARV Equip Screen active before Turn 1 starts */
+    int inv_modal_open;     /* 1 = Operative Inventory / Ground / Corpse / ARV Modal open */
+    int bus_x0, bus_y0;     /* Armored Response Vehicle bounding box on map */
+    int bus_x1, bus_y1;
+    int bus_turret_level;   /* 0 = None, 1 = Mk1 Auto-Turret, 2 = Mk2 Upgraded Turret */
+    int bus_turret_hp;      /* Structural HP of roof turret (can be disabled if abused!) */
+    int bus_turret_cooldown;/* Turns until ARV roof turret can fire again */
+    int bus_camp_turns;     /* Consecutive turns squad stayed inside bus */
+    int ufo_core_hits;      /* Cumulative hits on intact OBJ_UFO_CORE (triggers Mini-Nuke!) */
     int walking_active;     /* 1 = Selected unit is currently walking along g_walk_path */
+
     int walk_step_idx;
     int walk_subframe;      /* 0..3 interpolation frame per tile step */
     int turn_number;
@@ -139,7 +159,12 @@ void isomap_toggle_kneel(void);
 void isomap_turn_unit_toward(Unit *u, int tx, int ty);
 void isomap_move_or_interact(int tx, int ty);
 void isomap_fire_weapon(int tx, int ty);
+int  isomap_calc_shot_acc(const Unit *u, int mode, int dist);
 void isomap_end_turn(void);
+
+int  isomap_unit_in_bus(const Unit *u);
+void isomap_drop_ground_item(int x, int y, int z, int item_id);
+
 
 /* Rendering */
 int  isomap_get_cursor_mode(void);

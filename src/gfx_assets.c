@@ -1,6 +1,8 @@
 #include "gfx_assets.h"
+#include "items.h"
 #include "bmp_loader.h"
 #include "vga.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -1470,4 +1472,6 @@ void gfx_init_assets(void) {
     build_fx();
     build_hud_sprites();
     load_bmp_overrides();
+    items_init_assets();
 }
+

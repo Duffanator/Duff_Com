@@ -101,12 +101,15 @@ int main(int argc, char **argv) {
             vga_flip();
             vga_save_bmp("SNAP_TRN.BMP");
         } else {
+            g_battle.pre_mission_equip = 0;
+            g_battle.inv_modal_open    = 0;
             isomap_render();
             hud_render();
             input_draw_cursor();
             vga_flip();
             vga_save_bmp("SNAP.BMP");
         }
+
         music_shutdown();
         sound_shutdown();
         vga_shutdown();
@@ -130,7 +133,24 @@ int main(int argc, char **argv) {
     music_play_track(MUSIC_TRACK_GAME);
 
     while (running) {
+        if (g_camp.game_over_reset) {
+            g_camp.game_over_reset = 0;
+            music_play_track(MUSIC_TRACK_TITLE);
+            draw_title_banner();
+            for (;;) {
+                input_poll();
+                if (g_input.left_clicked || g_input.right_clicked || g_input.last_key != 0) {
+                    sfx_click();
+                    break;
+                }
+                vga_vsync();
+                music_tick();
+            }
+            music_play_track(MUSIC_TRACK_GAME);
+        }
+
         input_poll();
+
 
         /* MODE 0: Lehigh Valley Command Center (Radar Map / Bunker Base / Armory) */
         if (g_camp.mode == 0) {
@@ -221,7 +241,7 @@ int main(int argc, char **argv) {
             }
         }
 
-        if (g_input.my < HUD_Y && !g_battle.weapon_menu_open) {
+        if (g_input.my < HUD_Y && !g_battle.weapon_menu_open && !g_battle.inv_modal_open) {
             isomap_screen_to_tile(g_input.mx, g_input.my, g_battle.view_level,
                                   &g_battle.cur_x, &g_battle.cur_y);
         }
@@ -231,15 +251,22 @@ int main(int argc, char **argv) {
 
         if (g_battle.mission_ended == 0) {
             if (g_input.left_clicked) {
-                if (g_battle.weapon_menu_open || g_input.my >= HUD_Y) {
+                if (g_battle.inv_modal_open || g_battle.weapon_menu_open || g_input.my >= HUD_Y) {
                     hud_handle_click(g_input.mx, g_input.my, 0);
+                } else if (g_input.my >= HUD_Y - 15 && hud_handle_click(g_input.mx, g_input.my, 0)) {
+                    /* Clicked a Bottom-Right Spotted Alien Head Indicator! */
                 } else if (g_battle.fire_mode > 0) {
                     isomap_fire_weapon(g_battle.cur_x, g_battle.cur_y);
                 } else {
                     isomap_move_or_interact(g_battle.cur_x, g_battle.cur_y);
                 }
             } else if (g_input.right_clicked) {
-                if (g_battle.weapon_menu_open) {
+                if (g_battle.inv_modal_open) {
+                    if (!g_battle.pre_mission_equip) {
+                        g_battle.inv_modal_open = 0;
+                        sfx_click();
+                    }
+                } else if (g_battle.weapon_menu_open) {
                     g_battle.weapon_menu_open = 0;
                     sfx_click();
                 } else if (g_input.my >= HUD_Y) {
@@ -257,12 +284,29 @@ int main(int argc, char **argv) {
         /* Keyboard / Arcade Cabinet Button Hotkeys */
         switch (g_input.last_key) {
             case KEY_ESC:
+                if (g_battle.inv_modal_open) {
+                    g_battle.pre_mission_equip = 0;
+                    g_battle.inv_modal_open    = 0;
+                    sfx_click();
+                    break;
+                }
+                g_battle.weapon_menu_open = 0;
+                g_settings.menu_open = 1;
+                sfx_click();
+                break;
             case 'o':
             case 'O':
                 g_battle.weapon_menu_open = 0;
                 g_settings.menu_open = 1;
                 sfx_click();
                 break;
+            case 'i':
+            case 'I':
+                g_battle.weapon_menu_open = 0;
+                g_battle.inv_modal_open   = !g_battle.inv_modal_open;
+                sfx_click();
+                break;
+
             case 'm':
             case 'M':
                 campaign_on_mission_complete();

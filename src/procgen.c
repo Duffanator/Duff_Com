@@ -63,14 +63,19 @@ static void init_blank_map(uint8_t base_floor) {
     for (z = 0; z < MAP_LEVS; z++) {
         for (y = 0; y < MAP_H; y++) {
             for (x = 0; x < MAP_W; x++) {
-                g_map[z][y][x].unit_idx = -1;
-                g_map[z][y][x].fog      = FOG_UNSEEN;
+                g_map[z][y][x].unit_idx    = -1;
+                g_map[z][y][x].gnd_item[0] = -1;
+                g_map[z][y][x].gnd_item[1] = -1;
+                g_map[z][y][x].gnd_item[2] = -1;
+                g_map[z][y][x].gnd_item[3] = -1;
+                g_map[z][y][x].fog         = FOG_UNSEEN;
                 if (z == 0) {
                     g_map[0][y][x].floor_id = base_floor;
                 }
             }
         }
     }
+
 }
 
 static void reserve_lz(void) {
@@ -343,10 +348,11 @@ static void place_ufo_prop_local(int ux, int uy, int sz, int door_side, int rx, 
     }
 }
 
-/* Place Rounded Futuristic Alien Saucer (5x5 Scout or 7x7 Multi-Room Cruiser, Landed or Crashed!) */
+/* Place Rounded Futuristic Alien Saucer (5x5 Scout or 7x7 Multi-Room Cruiser/Battleship, Landed or Crashed!) */
 static void place_procedural_ufo(void) {
-    int sz = (rand() % 100 < 45) ? 5 : 7; /* 45% 5x5 Scout Saucer, 55% 7x7 Cruiser Saucer */
-    int crashed = (rand() % 100 < 45);
+    int ufo_class = 0; /* 0=Small Scout (5x5), 1=Medium Cruiser (7x7), 2=Large Assault Ship (7x7 Heavy) */
+    int sz = 5;
+    int crashed = 0;   /* Unless shot down (severity == 0), landed UFOs are completely undamaged! */
     int min_x = 2, max_x = LOT_MAX_X, min_y = 2, max_y = LOT_MAX_Y;
     int ux, uy, ux1, uy1, cx, cy, x, y, door_side;
 
@@ -354,15 +360,11 @@ static void place_procedural_ufo(void) {
     if (g_camp.launched_event >= 0 && g_camp.launched_event < MAX_RADAR_EVENTS &&
         g_camp.events[g_camp.launched_event].active) {
         const RadarEvent *ev = &g_camp.events[g_camp.launched_event];
-        crashed = (ev->severity == 0);
-        if (ev->type_title && strstr(ev->type_title, "SCOUT") != NULL) {
-            sz = 5;
-        } else if ((ev->type_title && strstr(ev->type_title, "CRUISER") != NULL) ||
-                   (ev->intel_desc && strstr(ev->intel_desc, "CRUISER") != NULL) ||
-                   ev->severity == 2) {
-            sz = 7;
-        }
+        crashed   = (ev->severity == 0) ? 1 : 0;
+        ufo_class = ev->ufo_size;
+        sz        = (ufo_class == 0) ? 5 : 7;
     }
+
 
     ux = (MAP_W - sz) / 2;
     uy = 3;
@@ -492,7 +494,16 @@ static void place_procedural_ufo(void) {
         place_ufo_prop_local(ux, uy, sz, door_side, 2, 5, OBJ_UFO_POD);
         place_ufo_prop_local(ux, uy, sz, door_side, 4, 5, OBJ_UFO_POD);
         place_ufo_prop_local(ux, uy, sz, door_side, 5, 4, OBJ_UFO_GRAVLIFT);
+
+        /* Large Assault Ships carry a Twin Elerium Reactor Core & extra Stasis/Ordnance Pods! */
+        if (ufo_class >= 2) {
+            place_ufo_prop_local(ux, uy, sz, door_side, 3, 4, OBJ_UFO_CORE);
+            place_ufo_prop_local(ux, uy, sz, door_side, 3, 5, OBJ_UFO_POD);
+            place_ufo_prop_local(ux, uy, sz, door_side, 1, 3, OBJ_UFO_CRYO);
+            place_ufo_prop_local(ux, uy, sz, door_side, 5, 3, OBJ_UFO_CRYO);
+        }
     } else {
+
         /* 5x5 Scout Saucer: Forward Navigation Alcove + Central Reactor + Cryo/Pod Bays + Grav-Lift */
         place_ufo_prop_local(ux, uy, sz, door_side, 1, 0, OBJ_UFO_NAV);
         place_ufo_prop_local(ux, uy, sz, door_side, 3, 0, OBJ_UFO_COMPUTER);
@@ -1602,14 +1613,177 @@ static int any_squad_has_los(int x, int y, int z, const ProcSpawnPlan *plan) {
     return 0;
 }
 
+/* Construct the hastily-armored Resistance Response Bus with exit ramp inside ZONE_LZ */
+static void place_armored_response_vehicle(void) {
+    int x, y;
+    for (y = g_lz_y0; y <= g_lz_y1; y++) {
+        for (x = g_lz_x0; x <= g_lz_x1; x++) {
+            isomap_clear_prop_at(0, y, x, OBJ_NONE, 0);
+            g_map[0][y][x].wall_west  = WALL_NONE;
+            g_map[0][y][x].wall_north = WALL_NONE;
+            g_map[0][y][x].floor_id   = FLOOR_WOOD;     /* Welded floorboards inside bus */
+            g_map[1][y][x].floor_id   = FLOOR_ROOF_TAR; /* Welded sheet-metal roof */
+        }
+    }
+    for (x = g_lz_x0; x <= g_lz_x1; x++) g_map[0][g_lz_y1 + 1][x].wall_north = WALL_NONE;
+    for (y = g_lz_y0; y <= g_lz_y1; y++) g_map[0][y][g_lz_x1 + 1].wall_west  = WALL_NONE;
+
+    /* Enclose bus hull in welded steel plates, leaving the exit ramp side open! */
+    for (x = g_lz_x0; x <= g_lz_x1; x++) {
+        if (g_lz_side != 0) {
+            g_map[0][g_lz_y0][x].wall_north = (x == (g_lz_x0 + g_lz_x1) / 2) ? WALL_STEEL_DMG : WALL_STEEL;
+        } else {
+            g_map[0][g_lz_y0][x].floor_id   = FLOOR_ASPHALT; /* Exit ramp lip */
+            g_map[1][g_lz_y0][x].floor_id   = FLOOR_NONE;
+        }
+        if (g_lz_side != 1) {
+            g_map[0][g_lz_y1 + 1][x].wall_north = (x == (g_lz_x0 + g_lz_x1) / 2) ? WALL_STEEL_DMG : WALL_STEEL;
+        } else {
+            g_map[0][g_lz_y1][x].floor_id   = FLOOR_ASPHALT;
+            g_map[1][g_lz_y1][x].floor_id   = FLOOR_NONE;
+        }
+    }
+    for (y = g_lz_y0; y <= g_lz_y1; y++) {
+        if (g_lz_side != 3) {
+            g_map[0][y][g_lz_x0].wall_west = (y == (g_lz_y0 + g_lz_y1) / 2) ? WALL_STEEL_DMG : WALL_STEEL;
+        } else {
+            g_map[0][y][g_lz_x0].floor_id  = FLOOR_ASPHALT;
+            g_map[1][y][g_lz_x0].floor_id  = FLOOR_NONE;
+        }
+        if (g_lz_side != 2) {
+            g_map[0][y][g_lz_x1 + 1].wall_west = (y == (g_lz_y0 + g_lz_y1) / 2) ? WALL_STEEL_DMG : WALL_STEEL;
+        } else {
+            g_map[0][y][g_lz_x1].floor_id  = FLOOR_ASPHALT;
+            g_map[1][y][g_lz_x1].floor_id  = FLOOR_NONE;
+        }
+    }
+}
+
+/* =========================================================================
+ * BIOME 4: DUFF-COM COLONIAL HOUSE HOME BASE DEFENSE (EXACT REPLICA!)
+ * ========================================================================= */
+static void gen_biome_base_defense(void) {
+    int r, c, q_r = 1, q_c = 1;
+
+    init_blank_map(FLOOR_GRASS);
+
+    /* Find Living Quarters (or Main Colonial House at [1][1]) for Squad Starting Location */
+    for (r = 0; r < 3; r++) {
+        for (c = 0; c < 4; c++) {
+            if (g_camp.bunker_grid[r][c] == FAC_QUARTERS) {
+                q_r = r;
+                q_c = c;
+            }
+        }
+    }
+    g_lz_side = 1;
+    g_lz_x0   = 5 + q_c * 6;
+    g_lz_x1   = g_lz_x0 + 4;
+    g_lz_y0   = 7 + q_r * 6 + 1;
+    g_lz_y1   = g_lz_y0 + 2;
+
+    /* Coopersburg Front Street & Perimeter Yard */
+    paint_road_strip(0, 27, 3, 1, 2);
+
+    /* Construct Exact Tactical Replica of the Player's 3x4 Colonial House Base Grid! */
+    for (r = 0; r < 3; r++) {
+        for (c = 0; c < 4; c++) {
+            int fid = g_camp.bunker_grid[r][c];
+            int bx0 = 5 + c * 6, by0 = 7 + r * 6;
+            int bx1 = bx0 + 5,   by1 = by0 + 5;
+            int mx  = (bx0 + bx1) / 2, my = (by0 + by1) / 2;
+
+            if (fid == FAC_EMPTY_LOT) {
+                if ((r + c) & 1) place_prop_if_clear(mx, my, 0, OBJ_CRATE);
+                continue;
+            }
+
+            if (fid == FAC_MAIN_HOUSE || fid == FAC_QUARTERS) {
+                build_structure(bx0, by0, bx1, by1, 2,
+                                FLOOR_WOOD, FLOOR_WOOD,
+                                WALL_BRICK, WALL_BRICK_WIN, 35, 1);
+                place_stairs_safe(bx0, by0);
+                if (fid == FAC_MAIN_HOUSE) {
+                    place_prop_if_clear(bx1 - 1, by0 + 1, 0, OBJ_ARCADE_CAB);
+                    place_prop_if_clear(bx1 - 1, by1 - 1, 0, OBJ_JUKEBOX);
+                } else {
+                    place_prop_if_clear(bx1 - 1, by0 + 1, 0, OBJ_DINER_BOOTH);
+                }
+            } else if (fid == FAC_GARAGE) {
+                build_structure(bx0, by0, bx1, by1, 1,
+                                FLOOR_ASPHALT, FLOOR_ROOF_TAR,
+                                WALL_STEEL, WALL_STEEL, 0, 1);
+                place_vehicle_if_clear(bx0 + 1, by0 + 2, 0, 0, VEH_PICKUP);
+                place_prop_if_clear(bx1 - 1, by0 + 1, 0, OBJ_CRATE);
+            } else if (fid == FAC_RADAR || fid == FAC_MISSILE_DEF || fid == FAC_OFFENSE_SYS) {
+                int x, y;
+                for (y = by0; y <= by1; y++)
+                    for (x = bx0; x <= bx1; x++)
+                        g_map[0][y][x].floor_id = FLOOR_SIDEWALK;
+                for (x = bx0; x <= bx1; x++) {
+                    if (x != mx) g_map[0][by0][x].wall_north = WALL_FENCE;
+                }
+                for (y = by0; y <= by1; y++) {
+                    if (y != my) g_map[0][y][bx0].wall_west = WALL_FENCE;
+                }
+                place_prop_if_clear(mx, my, 0,
+
+                                    (fid == FAC_RADAR) ? OBJ_UFO_NAV :
+                                    (fid == FAC_OFFENSE_SYS ? OBJ_UFO_CORE : OBJ_UFO_POD));
+                continue;
+            } else if (fid == FAC_LAB || fid == FAC_UPG_LAB || fid == FAC_CONTAINMENT) {
+                build_structure(bx0, by0, bx1, by1, 1,
+                                (fid == FAC_CONTAINMENT) ? FLOOR_UFO_DECK : FLOOR_DINER_TILE,
+                                FLOOR_ROOF_TAR,
+                                WALL_STEEL, WALL_DINER_GLASS, 35, 1);
+                place_prop_if_clear(bx0 + 1, by0 + 1, 0, OBJ_UFO_COMPUTER);
+                place_prop_if_clear(bx1 - 1, by0 + 1, 0, OBJ_UFO_CRYO);
+            } else {
+                /* FAC_STORES or FAC_UPG_WORKSHOP */
+                build_structure(bx0, by0, bx1, by1, 1,
+                                FLOOR_SIDEWALK, FLOOR_ROOF_TAR,
+                                WALL_STEEL, WALL_BRICK_WIN, 20, 1);
+                place_prop_if_clear(bx0 + 1, by0 + 1, 0, OBJ_CRATE);
+                place_prop_if_clear(bx1 - 1, by0 + 1, 0,
+                                    (fid == FAC_UPG_WORKSHOP) ? OBJ_UFO_POD : OBJ_BARREL);
+            }
+
+            /* Carve doorways on all 4 sides so connected base facilities link together! */
+            carve_rect_door(bx0, by0, bx1, by1, 0, mx, WALL_DOOR_OPEN);
+            carve_rect_door(bx0, by0, bx1, by1, 2, mx, WALL_DOOR_OPEN);
+            carve_rect_door(bx0, by0, bx1, by1, 1, my, WALL_DOOR_OPEN);
+            carve_rect_door(bx0, by0, bx1, by1, 3, my, WALL_DOOR_OPEN);
+        }
+    }
+}
+
 static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
     int cx = (g_lz_x0 + g_lz_x1) / 2;
     int cy = (g_lz_y0 + g_lz_y1) / 2;
-    int a_count = ((g_ufo_sz == 7) ? 7 : 6) + (rand() & 1); /* 6..8 aliens across the 34x34 sector */
+    int ufo_class = (g_ufo_sz == 7) ? 1 : 0;
+    int a_count;
     int a;
+
+    if (biome_id != BIOME_BASE_DEFENSE) {
+        place_armored_response_vehicle();
+    }
+
+
+    if (g_camp.launched_event >= 0 && g_camp.launched_event < MAX_RADAR_EVENTS &&
+        g_camp.events[g_camp.launched_event].active) {
+        ufo_class = g_camp.events[g_camp.launched_event].ufo_size;
+    }
+
+    /* Larger UFOs carry more aliens (Small Scout: 4..5, Medium Cruiser: 6..7, Large Ship: 8) */
+    if (ufo_class == 0)      a_count = 4 + (rand() & 1);
+    else if (ufo_class == 1) a_count = 6 + (rand() & 1);
+    else                     a_count = 8;
 
     memset(plan, 0, sizeof(*plan));
     plan->squad_dir = (g_lz_side == 0) ? 0 : (g_lz_side == 1) ? 4 : (g_lz_side == 2) ? 2 : 6;
+    plan->bus_x0 = g_lz_x0; plan->bus_y0 = g_lz_y0;
+    plan->bus_x1 = g_lz_x1; plan->bus_y1 = g_lz_y1;
+
 
     /* 5-Agent DUFF-COM Skyranger Landing Wedge inside ZONE_LZ */
     if (g_lz_side == 0 || g_lz_side == 1) {
@@ -1750,10 +1924,12 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
 
 void procgen_build_battlefield(int biome_id, ProcSpawnPlan *out_plan) {
     int b = biome_id % BIOME_COUNT;
-    if (b == BIOME_RTE309)       gen_biome_rte309();
-    else if (b == BIOME_PA_FARM) gen_biome_pa_farm();
-    else if (b == BIOME_SUBURB)  gen_biome_suburb();
-    else                         gen_biome_steel();
+    if (b == BIOME_RTE309)            gen_biome_rte309();
+    else if (b == BIOME_PA_FARM)      gen_biome_pa_farm();
+    else if (b == BIOME_SUBURB)       gen_biome_suburb();
+    else if (b == BIOME_BASE_DEFENSE) gen_biome_base_defense();
+    else                              gen_biome_steel();
+
 
     if (out_plan) {
         populate_spawn_plan(b, out_plan);

@@ -5,7 +5,8 @@
 #include <stdint.h>
 
 #define MAX_SQUAD_SIZE     5
-#define MAX_RECRUIT_POOL   8   /* Ready for future HQ "Hire Operatives" Barracks UI */
+#define MAX_RECRUIT_POOL   8   /* Ready for HQ "Hire Operatives" Barracks UI */
+#define MAX_MEMORIAL       64  /* Persistent KIA Memorial Wall capacity */
 #define OP_NAME_LEN        16  /* Base operative callsign/surname without rank prefix */
 #define OP_FULLNAME_MAX    15  /* Max visible characters for "<RANK> <NAME>" in HUD/Armory */
 
@@ -22,6 +23,7 @@ enum {
 
 /* Experience Point (XP) Awards */
 #define XP_COMBAT_HIT       10  /* Landing a weapon/grenade hit on a living Alien */
+#define XP_THROW_SUCCESS    6   /* Accurate field throw of weapon/ammo/grenade */
 #define XP_KILL_SECTOID     20  /* Eliminating a Sectoid */
 #define XP_KILL_FLOATER     25  /* Eliminating a Floater */
 #define XP_KILL_MUTON       35  /* Eliminating a Muton */
@@ -34,7 +36,12 @@ typedef struct {
     char name[OP_NAME_LEN]; /* Clean callsign/surname without rank prefix (e.g. "KELLER") */
     int gender;             /* 0 = Male, 1 = Female */
     int portrait_id;        /* 0..5 Male portraits, 6..11 Female portraits */
-    int weapon_id;          /* 0 = Assault Rifle, 1 = Laser Rifle, 2 = Heavy Plasma */
+    int weapon_id;          /* ITEM_* primary weapon ID (starts with ITEM_ASSAULT_RIFLE or ITEM_PISTOL) */
+    int sidearm_id;         /* Optional secondary weapon ID (e.g. ITEM_PISTOL or ITEM_NONE) */
+    int extra_clips;        /* Number of spare magazines/batteries/cartridges carried (0..4) */
+    int grenade_id;         /* ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE, or ITEM_ALIEN_GRENADE */
+    int grenades;           /* Number of grenades carried (0..4) */
+    int flares;             /* Number of night electro-flares carried (0..3) */
 
     int rank;               /* RANK_ROOKIE (0) .. RANK_COMMANDER (5) */
     int xp;                 /* Cumulative experience points */
@@ -46,8 +53,22 @@ typedef struct {
     int hp_max;             /* Base Max Health (before HQ Medbay bonus) */
     int energy_max;         /* Base Max Stamina / Energy */
     int firing_acc;         /* Base Aim / Firing Accuracy % */
+    int throw_acc;          /* Base Throwing Accuracy % (for grenades & throwing gear) */
     int reactions;          /* Base Reaction Fire initiative */
 } Operative;
+
+/* Persistent Fallen Operative Memorial Record */
+typedef struct {
+    int active;
+    char name[OP_NAME_LEN];
+    int rank;
+    int gender;
+    int portrait_id;
+    int kills;
+    int missions;
+    int day_kia;            /* Campaign day fallen */
+    char cause[20];         /* e.g. "KIA IN ACTION" or "MIA (LEFT BEHIND)" */
+} MemorialEntry;
 
 /* Rank titles, prefixes & XP thresholds */
 const char *operative_rank_name(int rank);
@@ -72,8 +93,11 @@ void        operative_refresh_recruit_pool(Operative *pool, int pool_count,
 void        operative_hire_replacement(Operative *dst_slot,
                                        Operative *pool, int pool_count,
                                        const Operative *squad, int squad_count);
+void        operative_record_memorial(MemorialEntry *memorial, int max_entries,
+                                      const Operative *fallen, int day_kia, const char *cause);
 
 /* 9x7 Mode 13h Pixel-Art Rank Insignia Badge Renderer */
 void        operative_draw_rank_badge(int x, int y, int rank);
 
 #endif /* OPERATIVE_H */
+
