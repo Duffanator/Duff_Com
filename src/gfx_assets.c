@@ -11,6 +11,7 @@ uint8_t spr_walls_west[WALL_COUNT][WALL_W * WALL_H];
 uint8_t spr_walls_north[WALL_COUNT][WALL_W * WALL_H];
 uint8_t spr_objects[OBJ_COUNT][OBJ_W * OBJ_H];
 uint8_t spr_units[NUM_UNIT_SPRITES][4][8][UNIT_W * UNIT_H];
+uint8_t spr_unit_shadow[UNIT_W * UNIT_H];
 uint8_t spr_deaths[NUM_UNIT_SPRITES][4][DEATH_W * DEATH_H];
 uint8_t spr_proj[PROJ_TYPE_COUNT][8][FX_W * FX_H];
 uint8_t spr_thrown[2][4][FX_W * FX_H];
@@ -137,6 +138,32 @@ static void build_floors(void) {
                         }
                         col = (uint8_t)(is_diamond_edge(x, y) ? 132 : (162 + (hash & 3)));
                         if (x == 16 && y == 8) col = 81;
+                        break;
+                    }
+
+                    case FLOOR_ARV_DECK: {
+                        int u = (x - 16) + (y - 8) * 2 + 64;
+                        int v = (x - 16) - (y - 8) * 2 + 64;
+                        if (is_diamond_edge(x, y))
+                            col = ((x + y) & 2) ? 97 : 12; /* Hazard yellow/black deck rim */
+                        else if (((u % 6 == 0) && (v % 6 == 0)) || (((u + 3) % 6 == 0) && ((v + 3) % 6 == 0)))
+                            col = 5; /* Raised steel diamond-plate tread stud */
+                        else
+                            col = (uint8_t)(9 + (hash & 1)); /* Gunmetal steel deck */
+                        break;
+                    }
+
+                    case FLOOR_ARV_ROOF: {
+                        int u = (x - 16) + (y - 8) * 2 + 64;
+                        int dist = abs(x - 16) + abs(y - 8) * 2;
+                        if (is_diamond_edge(x, y))
+                            col = 25; /* Dark armored roof seam bevel */
+                        else if (dist <= 4)
+                            col = (dist <= 2) ? 8 : 97; /* Rooftop hatch / turret ring */
+                        else if ((u % 6) == 0)
+                            col = 21; /* Structural roof rib */
+                        else
+                            col = (uint8_t)(23 + (hash & 1)); /* Olive-drab armored roof */
                         break;
                     }
                 }
@@ -334,6 +361,103 @@ static void build_walls(void) {
                             col_w = 144; col_n = 146;
                         } else {
                             col_w = 133; col_n = 136;
+                        }
+                        break;
+                    }
+
+                    case WALL_ARV_HULL:
+                    case WALL_ARV_WIN:
+                    case WALL_ARV_WHEEL:
+                    case WALL_ARV_FRONT:
+                    case WALL_ARV_DOOR_OPEN: {
+                        if (w == WALL_ARV_DOOR_OPEN) {
+                            /* Open 2-tile hydraulic side doorway header + thin side strut */
+                            if (y <= 1) {
+                                col_w = 22; col_n = 24;
+                            } else if (y <= 3) {
+                                int hz = ((x + y) & 2) != 0;
+                                col_w = hz ? 97 : 13;
+                                col_n = hz ? 98 : 14;
+                            } else if (x == 0 && y <= 20) {
+                                col_w = 8; col_n = 10;
+                            } else {
+                                col_w = COL_TRANS; col_n = COL_TRANS;
+                            }
+                            break;
+                        }
+
+                        /* Base military olive-drab / gunmetal armored vehicle body */
+                        if (y >= 21 && w != WALL_ARV_WHEEL) {
+                            /* Undercarriage ground clearance beneath vehicle skirt */
+                            if (y == 21 && x >= 3 && x <= 12) {
+                                col_w = 13; col_n = 14;
+                            } else {
+                                col_w = COL_TRANS; col_n = COL_TRANS;
+                            }
+                            break;
+                        }
+
+                        if (y == 12 || y == 13) {
+                            /* Gold DUFF-COM tactical vehicle stripe */
+                            col_w = 97; col_n = 99;
+                        } else if (y >= 14) {
+                            /* Lower angled gunmetal rock-slider armor skirt */
+                            col_w = ((x % 4) == 0) ? 10 : 8;
+                            col_n = ((x % 4) == 0) ? 12 : 10;
+                        } else {
+                            /* Upper sloped olive-drab armor plates with panel seams */
+                            col_w = (x == 0 || x == 15) ? 25 : 22;
+                            col_n = (x == 0 || x == 15) ? 27 : 24;
+                        }
+
+                        if (w == WALL_ARV_WIN) {
+                            /* Emergency roof strobe beacon + bulletproof cab window */
+                            if ((y == 1 || y == 2) && x >= 6 && x <= 9) {
+                                col_w = (x <= 7) ? 33 : 80;
+                                col_n = (x <= 7) ? 35 : 81;
+                            } else if (y >= 5 && y <= 11 && x >= 2 && x <= 13) {
+                                if (x == 2 || x == 7 || x == 8 || x == 13 || y == 5 || y == 11) {
+                                    col_w = 11; col_n = 12;
+                                } else {
+                                    col_w = ((x + y) % 4 == 0) ? 80 : 70;
+                                    col_n = ((x + y) % 4 == 0) ? 81 : 72;
+                                }
+                            }
+                        } else if (w == WALL_ARV_WHEEL) {
+                            /* Flared fender arch + heavy off-road tactical tire */
+                            int dxw = x * 2 - 15;
+                            int dyw = y * 2 - 35;
+                            int r2  = dxw * dxw + dyw * dyw;
+                            if (y >= 21 && (x <= 2 || x >= 13)) {
+                                col_w = COL_TRANS; col_n = COL_TRANS;
+                            } else if (r2 <= 22) {
+                                col_w = (r2 <= 6) ? 11 : 4;  /* Steel wheel rim + hub */
+                                col_n = (r2 <= 6) ? 12 : 6;
+                            } else if (r2 <= 115) {
+                                col_w = ((x + y) & 1) ? 13 : 14; /* Treaded rubber tire */
+                                col_n = ((x + y) & 1) ? 14 : 15;
+                            } else if (r2 <= 155 && y <= 19) {
+                                col_w = 7; col_n = 9; /* Heavy wheel-well fender arch */
+                            }
+                        } else if (w == WALL_ARV_FRONT) {
+                            /* Front windshield visor, radiator grille, headlights & bullbar */
+                            if (y >= 4 && y <= 10 && x >= 2 && x <= 13) {
+                                if (x == 2 || x == 7 || x == 8 || x == 13 || y == 4 || y == 10) {
+                                    col_w = 11; col_n = 12;
+                                } else {
+                                    col_w = ((x + y) % 4 == 0) ? 80 : 70;
+                                    col_n = ((x + y) % 4 == 0) ? 81 : 72;
+                                }
+                            } else if (y >= 13 && y <= 16 && ((x >= 1 && x <= 3) || (x >= 12 && x <= 14))) {
+                                col_w = 96; col_n = 97; /* Twin halogen headlights */
+                            } else if (y == 17 && ((x >= 1 && x <= 3) || (x >= 12 && x <= 14))) {
+                                col_w = 113; col_n = 114; /* Amber fog/turn lamps */
+                            } else if (y >= 12 && y <= 18 && x >= 5 && x <= 10) {
+                                col_w = (x & 1) ? 6 : 13; /* Vertical-slat armored radiator grille */
+                                col_n = (x & 1) ? 8 : 14;
+                            } else if (y >= 19 && y <= 20) {
+                                col_w = 5; col_n = 7; /* Heavy steel front bullbar bumper */
+                            }
                         }
                         break;
                     }
@@ -852,6 +976,18 @@ static void build_objects(void) {
 /* Build 8-directional sprites for DUFF-COM Soldiers, Sectoids, Floaters, and Mutons */
 static void build_units(void) {
     int type, pose, dir, x, y;
+
+    /* Build standalone unit ground shadow sprite (rendered on floor below unit) */
+    memset(spr_unit_shadow, COL_TRANS, UNIT_W * UNIT_H);
+    for (y = 26; y <= 29; y++) {
+        for (x = 5; x <= 18; x++) {
+            int d2 = (x - 12) * (x - 12) + (y - 28) * (y - 28) * 4;
+            if (d2 <= 28) {
+                spr_unit_shadow[y * UNIT_W + x] = (d2 <= 14) ? 14 : 13;
+            }
+        }
+    }
+
     for (type = 0; type < NUM_UNIT_SPRITES; type++) {
         for (pose = 0; pose < 4; pose++) {
             for (dir = 0; dir < 8; dir++) {
@@ -860,13 +996,6 @@ static void build_units(void) {
                 int leg_l_off = (pose == 2) ? -2 : (pose == 3 ?  2 : 0);
                 int leg_r_off = (pose == 2) ?  2 : (pose == 3 ? -2 : 0);
                 memset(dst, COL_TRANS, UNIT_W * UNIT_H);
-
-                /* Drop shadow under feet */
-                for (y = 26; y <= 29; y++) {
-                    for (x = 7; x <= 16; x++) {
-                        dst[y * UNIT_W + x] = 14;
-                    }
-                }
 
                 if (type < UNIT_SPR_SECTOID) {
                     /* DUFF-COM Tactical Operative Fallback (Male 0..2 & Female 3..5) */
@@ -947,8 +1076,8 @@ static void build_units(void) {
                     dst[(16 + y_off) * UNIT_W + 15] = 144;
                     dst[(16 + y_off) * UNIT_W + 16] = 145;
                 } else if (type == UNIT_SPR_FLOATER) {
-                    /* FLOATER: Maroon cape + cybernetic hovering jetpack base */
-                    int bob = (pose >= 2) ? -2 : 0;
+                    /* FLOATER: Maroon cape + cybernetic hovering jetpack base (elevated 3px above floor shadow) */
+                    int bob = ((pose >= 2) ? -2 : 0) - 3;
                     for (y = 19 + bob; y < 26 + bob; y++) {
                         for (x = 9; x <= 14; x++) dst[y * UNIT_W + x] = (y > 23 + bob) ? 114 : 6;
                     }
@@ -960,7 +1089,7 @@ static void build_units(void) {
                     }
                     dst[(8 + bob) * UNIT_W + 10] = 96;
                     dst[(8 + bob) * UNIT_W + 13] = 96;
-                } else {
+                } else if (type == UNIT_SPR_MUTON) {
                     /* MUTON: Heavy Muscular Green/Purple Alien Shock Trooper */
                     for (y = 20 + (pose == 1 ? 2 : 0); y < 28; y++) {
                         dst[y * UNIT_W +  8 + (leg_l_off / 2)] = 132;
@@ -984,6 +1113,61 @@ static void build_units(void) {
                     dst[(15 + y_off) * UNIT_W + 16] = 144;
                     dst[(15 + y_off) * UNIT_W + 17] = 145;
                     dst[(16 + y_off) * UNIT_W + 16] = 144;
+                } else {
+                    /* COOPERSBURG LOCAL CIVILIAN (Unarmed Male 9 & Female 10) */
+                    int is_fem = (type == UNIT_SPR_CIV_FEM);
+                    uint8_t hair_c = is_fem ? 36 : 54;
+                    uint8_t skin_c = 244;
+                    uint8_t jkt_hi = is_fem ? 98 : 114; /* Gold/yellow or warm amber jacket */
+                    uint8_t jkt_sh = is_fem ? 101 : 52;
+                    uint8_t tee_c  = is_fem ? 81 : 2;
+                    /* Denim jeans & shoes */
+                    for (y = 20 + (pose == 1 ? 2 : 0); y < 28 + leg_l_off / 2; y++) {
+                        int lx = 9 + (leg_l_off / 2);
+                        if (y < UNIT_H) {
+                            dst[y * UNIT_W + lx]     = (y >= 26) ? 54 : 67;
+                            dst[y * UNIT_W + lx + 1] = (y >= 26) ? 54 : 69;
+                        }
+                    }
+                    for (y = 20 + (pose == 1 ? 2 : 0); y < 28 + leg_r_off / 2; y++) {
+                        int rx = 13 + (leg_r_off / 2);
+                        if (y < UNIT_H) {
+                            dst[y * UNIT_W + rx]     = (y >= 26) ? 54 : 69;
+                            dst[y * UNIT_W + rx + 1] = (y >= 26) ? 54 : 67;
+                        }
+                    }
+                    /* Unarmed civilian jacket & shirt (no armor or rifle) */
+                    for (y = 12 + y_off; y < 21 + (pose == 1 ? 2 : 0); y++) {
+                        int x0 = is_fem ? 9 : 8;
+                        int x1 = is_fem ? 14 : 15;
+                        for (x = x0; x <= x1; x++) {
+                            if ((x == 11 || x == 12) && dir >= 2 && dir <= 6)
+                                dst[y * UNIT_W + x] = tee_c;
+                            else
+                                dst[y * UNIT_W + x] = (x == x0 || x == x1) ? jkt_sh : jkt_hi;
+                        }
+                    }
+                    /* Unarmed swinging/cowering hands at sides */
+                    dst[(17 + y_off) * UNIT_W + 7]  = skin_c;
+                    dst[(17 + y_off) * UNIT_W + 16] = skin_c;
+                    /* Head & hair (no visor) */
+                    for (y = 6 + y_off; y < 12 + y_off; y++) {
+                        for (x = 9; x <= 14; x++) {
+                            dst[y * UNIT_W + x] = (y < 9 + y_off || dir == 0 || dir == 1 || dir == 7) ? hair_c : skin_c;
+                        }
+                    }
+                    if (is_fem) {
+                        /* Shoulder-length hair locks */
+                        dst[(10 + y_off) * UNIT_W + 8]  = hair_c;
+                        dst[(11 + y_off) * UNIT_W + 8]  = hair_c;
+                        dst[(10 + y_off) * UNIT_W + 15] = hair_c;
+                        dst[(11 + y_off) * UNIT_W + 15] = hair_c;
+                    }
+                    if (dir >= 2 && dir <= 6) {
+                        int ex = (dir == 2) ? 13 : (dir == 6) ? 9 : 10;
+                        dst[(9 + y_off) * UNIT_W + ex]     = 14;
+                        dst[(9 + y_off) * UNIT_W + ex + 1] = 14;
+                    }
                 }
             }
         }
@@ -1006,9 +1190,14 @@ static void build_deaths(void) {
         } else if (type == UNIT_SPR_FLOATER) {
             body_hi = 35;  body_sh = 39;
             head_c  = 51;  leg_c   = 7;  blood_c = 39;
-        } else {
+        } else if (type == UNIT_SPR_MUTON) {
             body_hi = 18;  body_sh = 21;
             head_c  = 131; leg_c   = 130; blood_c = 21;
+        } else {
+            body_hi = (type == UNIT_SPR_CIV_FEM) ? 98 : 114;
+            body_sh = (type == UNIT_SPR_CIV_FEM) ? 101 : 52;
+            head_c  = (type == UNIT_SPR_CIV_FEM) ? 36 : 54;
+            leg_c   = 67;  blood_c = 38;
         }
 
         for (stg = 0; stg < 4; stg++) {
@@ -1403,6 +1592,8 @@ static void load_bmp_overrides(void) {
         }
         bmp_extract_tile(sheet, sw, sh, 3 * FX_W, 4 * FX_H, FX_W, FX_H, spr_reticle[0]);
         bmp_extract_tile(sheet, sw, sh, 4 * FX_W, 4 * FX_H, FX_W, FX_H, spr_reticle[1]);
+        memset(spr_unit_shadow, COL_TRANS, 8 * UNIT_W);
+        bmp_extract_tile(sheet, sw, sh, 5 * FX_W, 4 * FX_H, FX_W, FX_H, spr_unit_shadow + 8 * UNIT_W);
 
         for (p = 0; p < 4; p++) {
             bmp_extract_tile(sheet, sw, sh, p * FX_W,       5 * FX_H, FX_W, FX_H, spr_splash[SPLASH_BULLET][p]);

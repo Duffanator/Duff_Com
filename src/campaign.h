@@ -63,6 +63,10 @@ typedef struct {
     int win_streak;         /* Consecutive victories (increases rare Home Base Defense chance) */
     int total_kills;
     int total_kia;          /* Career fallen operatives (permadeath memorial count) */
+    int total_civilians_saved;  /* Career Coopersburg civilians rescued */
+    int total_civilians_killed; /* Career Coopersburg civilians killed */
+    int total_map_damage;       /* Career structural collateral damage */
+    int total_score;            /* Cumulative Duff-COM campaign score */
 
     /* Phase 1: Money, Scientists, Stores, ARV Cargo & Research State */
     int money;              /* Duff-COM funds in dollars ($12,000 at start) */

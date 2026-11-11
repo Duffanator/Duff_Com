@@ -167,12 +167,12 @@ public class DuffArtGen {
     }
 
     static void GenFloors(string path) {
-        // 16 floor tiles x 32x16 = 512x16 (includes UFO interior deck & rounded saucer dome roof caps!)
-        using (Bitmap bmp = new Bitmap(16 * 32, 16)) {
+        // 18 floor tiles x 32x16 = 576x16 (includes UFO interior/roof caps & ARV deck/roof!)
+        using (Bitmap bmp = new Bitmap(18 * 32, 16)) {
             using (Graphics g = Graphics.FromImage(bmp)) g.Clear(Trans);
             Random rng = new Random(1994);
 
-            for (int f = 1; f < 16; f++) {
+            for (int f = 1; f < 18; f++) {
                 int ox = f * 32;
                 for (int y = 0; y < 16; y++) {
                     for (int x = 0; x < 32; x++) {
@@ -275,6 +275,42 @@ public class DuffArtGen {
                                 double rc = Math.Sqrt((uf - pu) * (uf - pu) + (vf - pv) * (vf - pv));
                                 c = UfoRoofPixel(x, y, rc, true);
                                 break;
+
+                            case 16: // FLOOR_ARV_DECK: Heavy gunmetal diamond-plate troop deck + hazard trim
+                                int au = (x - 16) + (y - 8) * 2 + 64;
+                                int av = (x - 16) - (y - 8) * 2 + 64;
+                                int ed = (x < 16 ? (15 - x) : (x - 16)) + (y < 8 ? (7 - y) : (y - 8)) * 2;
+                                if (ed >= 14) {
+                                    bool hz = (((x + y) >> 1) & 1) == 0;
+                                    c = hz ? Color.FromArgb(238, 196, 44) : Color.FromArgb(34, 38, 46);
+                                } else if ((au % 8 == 0) || (av % 8 == 0)) {
+                                    c = Color.FromArgb(46, 52, 62);
+                                } else if (((au % 4 == 2) && (av % 4 == 2)) || ((au % 4 == 0) && (av % 4 == 0))) {
+                                    c = Color.FromArgb(132, 144, 160); // Raised steel diamond tread lug
+                                } else {
+                                    int dv2 = 74 + (n & 3) * 3;
+                                    c = Color.FromArgb(dv2 - 4, dv2, dv2 + 10);
+                                }
+                                break;
+
+                            case 17: // FLOOR_ARV_ROOF: Olive-drab/gunmetal armored vehicle roof w/ hatch & ribs
+                                int ru = (x - 16) + (y - 8) * 2 + 64;
+                                int rv2 = (x - 16) - (y - 8) * 2 + 64;
+                                int red = (x < 16 ? (15 - x) : (x - 16)) + (y < 8 ? (7 - y) : (y - 8)) * 2;
+                                int rdist = Math.Abs(x - 16) + Math.Abs(y - 8) * 2;
+                                if (red >= 14) {
+                                    c = Color.FromArgb(52, 64, 54); // Beveled armored roof edge
+                                } else if (rdist <= 4) {
+                                    c = (rdist == 4) ? Color.FromArgb(232, 192, 48) :
+                                        (rdist <= 2) ? Color.FromArgb(68, 76, 86) :
+                                                       Color.FromArgb(118, 132, 120);
+                                } else if ((ru % 6 == 0) || (rv2 % 12 == 0)) {
+                                    c = Color.FromArgb(124, 142, 122); // Raised structural roof rib
+                                } else {
+                                    int ov = 88 + (n & 3) * 4;
+                                    c = Color.FromArgb(ov - 6, ov + 12, ov - 4);
+                                }
+                                break;
                         }
                         if (c != Trans) PSet(bmp, ox + x, y, c);
                     }
@@ -285,19 +321,20 @@ public class DuffArtGen {
     }
 
     static void GenWalls(string westPath, string northPath) {
-        // 21 wall types x 16x32 = 336x32 (includes UFO convex saucer hull & alien oval airlocks!)
-        using (Bitmap bmpW = new Bitmap(21 * 16, 32))
-        using (Bitmap bmpN = new Bitmap(21 * 16, 32)) {
+        // 26 wall types x 16x32 = 416x32 (includes UFO saucer hull & custom Armored Response Vehicle walls!)
+        using (Bitmap bmpW = new Bitmap(26 * 16, 32))
+        using (Bitmap bmpN = new Bitmap(26 * 16, 32)) {
             using (Graphics g = Graphics.FromImage(bmpW)) g.Clear(Trans);
             using (Graphics g = Graphics.FromImage(bmpN)) g.Clear(Trans);
 
-            for (int w = 1; w < 21; w++) {
+            for (int w = 1; w < 26; w++) {
                 int ox = w * 16;
                 for (int x = 0; x < 16; x++) {
                     int topW = (15 - x) / 2;
                     int topN = x / 2;
                     bool isFence = (w == 9 || w == 16);
                     bool isUfo   = (w >= 17 && w <= 20);
+                    bool isArv   = (w >= 21 && w <= 25);
                     int wallH = isFence ? 13 : 24;
                     int yStart = isFence ? (24 - 13) : 0;
 
@@ -533,10 +570,161 @@ public class DuffArtGen {
                                     }
                                 }
                                 break;
+
+                            case 21: // WALL_ARV_HULL: Armored Response Vehicle olive-drab/gunmetal body panel
+                            case 22: // WALL_ARV_WIN:  Armored Response Vehicle cab w/ ballistic window & strobe
+                            case 23: // WALL_ARV_WHEEL: Armored Response Vehicle fender arch & off-road tire
+                            case 24: // WALL_ARV_FRONT: Armored Response Vehicle front grille, headlights & bumper
+                            case 25: // WALL_ARV_DOOR_OPEN: Open 2-tile hydraulic side troop bay doorway header
+                                if (w == 25) {
+                                    if (y == 0) {
+                                        cw = Color.FromArgb(148, 166, 144);
+                                        cn = Color.FromArgb(112, 128, 108);
+                                    } else if (y == 1 || y == 2) {
+                                        bool led = (y == 1 && (x == 7 || x == 8));
+                                        cw = led ? Color.FromArgb(95, 250, 75) : Color.FromArgb(84, 102, 82);
+                                        cn = led ? Color.FromArgb(72, 210, 55) : Color.FromArgb(62, 76, 60);
+                                    } else if (y == 3 || y == 4) {
+                                        bool hz = (((x + y) >> 1) & 1) == 0;
+                                        cw = hz ? Color.FromArgb(245, 204, 48) : Color.FromArgb(32, 36, 42);
+                                        cn = hz ? Color.FromArgb(198, 162, 36) : Color.FromArgb(22, 26, 32);
+                                    } else if (x == 0 && y <= 20) {
+                                        cw = Color.FromArgb(96, 106, 118);
+                                        cn = Color.FromArgb(68, 76, 86);
+                                    } else {
+                                        cw = Trans; cn = Trans;
+                                    }
+                                    break;
+                                }
+
+                                // Undercarriage ground clearance below y == 20 (except where tire touches road)
+                                if (y >= 21 && w != 23) {
+                                    if (y == 21 && x >= 2 && x <= 13) {
+                                        cw = Color.FromArgb(34, 38, 44);
+                                        cn = Color.FromArgb(24, 28, 34);
+                                    } else {
+                                        cw = Trans; cn = Trans;
+                                    }
+                                    break;
+                                }
+
+                                // Base contoured military olive-drab upper armor & gunmetal lower skirt
+                                if (y == 0) {
+                                    cw = Color.FromArgb(156, 174, 150);
+                                    cn = Color.FromArgb(118, 134, 114);
+                                } else if (y == 12 || y == 13) {
+                                    // High-visibility gold DUFF-COM vehicle stripe
+                                    bool stencil = (x == 0 || x == 15);
+                                    cw = stencil ? Color.FromArgb(52, 64, 52) : Color.FromArgb(245, 204, 48);
+                                    cn = stencil ? Color.FromArgb(38, 48, 38) : Color.FromArgb(198, 162, 36);
+                                } else if (y >= 14) {
+                                    // Lower sloped gunmetal rock-slider armor skirt
+                                    bool rib = (y == 14 || y == 20 || x == 0 || x == 15 || (x % 4 == 0));
+                                    cw = rib ? Color.FromArgb(56, 64, 74) : Color.FromArgb(88, 98, 110);
+                                    cn = rib ? Color.FromArgb(40, 46, 54) : Color.FromArgb(64, 72, 82);
+                                } else {
+                                    // Upper sloped olive-drab armored hull with rivets & panel seams
+                                    bool seam = (x == 0 || x == 15 || (w == 21 && x == 8));
+                                    bool rivet = ((y == 2 || y == 10) && (x == 2 || x == 6 || x == 10 || x == 13));
+                                    int lift = (11 - y) * 2;
+                                    cw = seam  ? Color.FromArgb(52, 66, 52) :
+                                         rivet ? Color.FromArgb(148, 166, 144) :
+                                                 Color.FromArgb(82 + lift, 104 + lift, 80 + lift);
+                                    cn = seam  ? Color.FromArgb(38, 48, 38) :
+                                         rivet ? Color.FromArgb(112, 128, 108) :
+                                                 Color.FromArgb(58 + lift, 76 + lift, 56 + lift);
+                                }
+
+                                if (w == 22) {
+                                    // Emergency roof strobe beacon + recessed bulletproof cab viewport
+                                    if ((y == 1 || y == 2) && x >= 5 && x <= 10) {
+                                        cw = (x <= 7) ? Color.FromArgb(250, 52, 48) : Color.FromArgb(75, 235, 255);
+                                        cn = (x <= 7) ? Color.FromArgb(205, 38, 36) : Color.FromArgb(52, 190, 220);
+                                    } else if (y >= 4 && y <= 11 && x >= 2 && x <= 13) {
+                                        if (x == 2 || x == 7 || x == 8 || x == 13 || y == 4 || y == 11) {
+                                            cw = Color.FromArgb(48, 56, 66);
+                                            cn = Color.FromArgb(34, 40, 48);
+                                        } else {
+                                            bool glint = ((x + y) % 4 == 0);
+                                            cw = glint ? Color.FromArgb(175, 248, 255) : Color.FromArgb(52, 128, 158);
+                                            cn = glint ? Color.FromArgb(132, 208, 224) : Color.FromArgb(36, 96, 122);
+                                        }
+                                    } else if (y == 15 && (x == 11 || x == 12)) {
+                                        cw = Color.FromArgb(220, 228, 238); // Cab door latch
+                                        cn = Color.FromArgb(168, 176, 188);
+                                    } else if (y == 19 && x >= 5 && x <= 10) {
+                                        cw = Color.FromArgb(142, 154, 168); // Steel cab boarding step
+                                        cn = Color.FromArgb(106, 116, 128);
+                                    }
+                                } else if (w == 23) {
+                                    // Heavy flared wheel-arch fender + deep-treaded tactical rubber tire
+                                    double dxw = x - 7.5;
+                                    double dyw = y - 17.5;
+                                    double rw  = Math.Sqrt(dxw * dxw + dyw * dyw);
+                                    if (y >= 21 && (x <= 1 || x >= 14)) {
+                                        cw = Trans; cn = Trans;
+                                    } else if (rw <= 2.3) {
+                                        // Heavy steel 6-lug wheel rim & dark center axle hub
+                                        bool hub = (rw <= 1.0);
+                                        cw = hub ? Color.FromArgb(48, 54, 62) : Color.FromArgb(164, 176, 190);
+                                        cn = hub ? Color.FromArgb(34, 38, 46) : Color.FromArgb(124, 134, 148);
+                                    } else if (rw <= 5.6) {
+                                        // Thick black/charcoal off-road rubber tire with outer tread lugs
+                                        bool lug = (rw >= 4.4) && (((x + y) & 1) == 0);
+                                        cw = lug ? Color.FromArgb(20, 22, 26) : Color.FromArgb(42, 46, 54);
+                                        cn = lug ? Color.FromArgb(16, 18, 22) : Color.FromArgb(30, 34, 40);
+                                    } else if (rw <= 6.8 && y <= 19) {
+                                        // Contoured steel fender flare arch over tire
+                                        cw = Color.FromArgb(116, 128, 138);
+                                        cn = Color.FromArgb(84, 94, 104);
+                                    } else if (y >= 21) {
+                                        cw = Trans; cn = Trans;
+                                    }
+                                } else if (w == 24) {
+                                    // Armored Front Nose: amber cab lights, ballistic windshield, radiator grille, headlights & bullbar!
+                                    if (y == 2 && (x == 3 || x == 7 || x == 8 || x == 12)) {
+                                        cw = Color.FromArgb(255, 205, 45);
+                                        cn = Color.FromArgb(215, 168, 35);
+                                    } else if (y >= 4 && y <= 10 && x >= 2 && x <= 13) {
+                                        if (x == 2 || x == 7 || x == 8 || x == 13 || y == 4 || y == 10) {
+                                            cw = Color.FromArgb(48, 56, 66);
+                                            cn = Color.FromArgb(34, 40, 48);
+                                        } else {
+                                            bool glint = ((x + y) % 4 == 0);
+                                            cw = glint ? Color.FromArgb(175, 248, 255) : Color.FromArgb(52, 128, 158);
+                                            cn = glint ? Color.FromArgb(132, 208, 224) : Color.FromArgb(36, 96, 122);
+                                        }
+                                    } else if (y >= 13 && y <= 16 && ((x >= 1 && x <= 3) || (x >= 12 && x <= 14))) {
+                                        // Bright halogen headlamps
+                                        bool core = (y >= 14 && y <= 15 && (x == 2 || x == 13));
+                                        cw = core ? Color.FromArgb(255, 255, 240) : Color.FromArgb(255, 232, 110);
+                                        cn = core ? Color.FromArgb(245, 245, 210) : Color.FromArgb(225, 198, 85);
+                                    } else if (y == 17 && ((x >= 1 && x <= 3) || (x >= 12 && x <= 14))) {
+                                        // Amber turn/fog lamps
+                                        cw = Color.FromArgb(250, 158, 38);
+                                        cn = Color.FromArgb(210, 126, 28);
+                                    } else if (y >= 12 && y <= 18 && x >= 5 && x <= 10) {
+                                        // Vertical-slat armored radiator grille
+                                        bool slat = ((x & 1) == 1);
+                                        cw = slat ? Color.FromArgb(132, 144, 156) : Color.FromArgb(28, 32, 38);
+                                        cn = slat ? Color.FromArgb(98, 108, 120)  : Color.FromArgb(20, 22, 28);
+                                    } else if (y == 19 || y == 20) {
+                                        // Heavy steel front bullbar bumper with corner hazard chevrons
+                                        if (x <= 2 || x >= 13) {
+                                            bool hz = ((x + y) & 1) == 0;
+                                            cw = hz ? Color.FromArgb(245, 204, 48) : Color.FromArgb(32, 36, 42);
+                                            cn = hz ? Color.FromArgb(198, 162, 36) : Color.FromArgb(22, 26, 32);
+                                        } else {
+                                            cw = (y == 19) ? Color.FromArgb(148, 160, 174) : Color.FromArgb(88, 98, 110);
+                                            cn = (y == 19) ? Color.FromArgb(112, 122, 134) : Color.FromArgb(64, 72, 82);
+                                        }
+                                    }
+                                }
+                                break;
                         }
 
                         // 3D sunlit wall cap at y==0 and dark ambient occlusion baseboard at y==wallH-1
-                        if (!isUfo) {
+                        if (!isUfo && !isArv) {
                             if (y == 0 && cw != Trans) {
                                 cw = Color.FromArgb(225, 225, 230);
                                 cn = Color.FromArgb(185, 185, 192);
@@ -1508,12 +1696,6 @@ public class DuffArtGen {
                     for (int dir = 0; dir < 8; dir++) {
                         int ox = dir * 24;
 
-                        // Cast ground shadow ellipse
-                        for (int y = 26; y <= 29; y++)
-                            for (int x = 6; x <= 17; x++)
-                                if ((x - 12)*(x - 12) + (y - 28)*(y - 28)*4 <= 26)
-                                    PSet(bmp, ox + x, oy + y, Color.FromArgb(28, 32, 38));
-
                         Color[,] spr = new Color[24, 32];
                         for (int py = 0; py < 32; py++)
                             for (int px = 0; px < 24; px++) spr[px, py] = Trans;
@@ -1743,7 +1925,8 @@ public class DuffArtGen {
 
                         } else if (type == 7) {
                             // FLOATER: Flared Crimson Cape + Steel Collar + Cybernetic Hover Thruster & Exhaust!
-                            int bob = (pose >= 2) ? -2 : 0;
+                            // Elevated 3px higher in frame; ground shadow is rendered separately on the floor below!
+                            int bob = ((pose >= 2) ? -2 : 0) - 3;
                             // Tapered metal anti-grav thruster pod + bright flame jet
                             for (int y = 19 + bob; y <= 25 + bob; y++) {
                                 int hw = (y >= 23 + bob) ? 2 : 3;
@@ -1841,15 +2024,6 @@ public class DuffArtGen {
                     Color[,] spr = new Color[32, 32];
                     for (int py = 0; py < 32; py++)
                         for (int px = 0; px < 32; px++) spr[px, py] = Trans;
-
-                    // Ground shadow on stages 0..2
-                    if (stg < 3) {
-                        int sy0 = (stg == 0) ? 24 : 23;
-                        for (int y = sy0; y <= sy0 + 3; y++)
-                            for (int x = 9; x <= 23; x++)
-                                if ((x - 16) * (x - 16) + (y - (sy0 + 1)) * (y - (sy0 + 1)) * 5 <= 42)
-                                    PSet(bmp, ox + x, oy + y, Color.FromArgb(28, 32, 38));
-                    }
 
                     if (type < 6) {
                         // ====================================================================
@@ -2451,6 +2625,20 @@ public class DuffArtGen {
                 }
             }
 
+            // Col 5 of Row 4: Standalone Unit Ground Shadow Sprite (maps to y=26..29 of 24x32 spr_unit_shadow)
+            {
+                int ox = 5 * 24, oy = 4 * 24;
+                for (int py = 18; py <= 21; py++) {
+                    for (int px = 5; px <= 18; px++) {
+                        int d2 = (px - 12) * (px - 12) + (py - 20) * (py - 20) * 4;
+                        if (d2 <= 28) {
+                            Color sc = (d2 <= 14) ? Color.FromArgb(18, 20, 26) : Color.FromArgb(34, 40, 48);
+                            PSet(bmp, ox + px, oy + py, sc);
+                        }
+                    }
+                }
+            }
+
             // 4. ROWS 5..7: Six 4-Frame 24x24 Impact Splash Animations!
             // 0=SPLASH_BULLET, 1=SPLASH_LASER, 2=SPLASH_PLASMA, 3=SPLASH_GLASS, 4=SPLASH_HIT_HUMAN, 5=SPLASH_HIT_ALIEN
             Random rng = new Random(199409);
@@ -2729,7 +2917,8 @@ if ($ObjectsOnly) {
     Write-Output "Generated assets/OBJECTS.BMP!"
 } else {
     [DuffArtGen]::GenerateAll((Resolve-Path "assets").Path)
-    & (Join-Path $PSScriptRoot "gen_new_assets.ps1")
+    & (Join-Path $PSScriptRoot "gen_items.ps1")
+    & (Join-Path $PSScriptRoot "gen_base.ps1")
     Write-Output "Generated BMP sprite sheets in assets/!"
 }
 

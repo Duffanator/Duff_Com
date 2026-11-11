@@ -1370,6 +1370,9 @@ static void open_edge_between(int z, int x0, int y0, int x1, int y1) {
     else if (y1 == y0 - 1) wptr = &g_map[z][y0][x0].wall_north;
 
     if (wptr && isomap_wall_blocks_move(*wptr)) {
+        if (*wptr >= WALL_ARV_HULL && *wptr <= WALL_ARV_FRONT) {
+            return; /* Never punch holes through Armored Response Vehicle hull walls */
+        }
         if (*wptr == WALL_FENCE || *wptr == WALL_FENCE_DMG) {
             *wptr = WALL_NONE;
         } else if (*wptr == WALL_UFO_HULL || *wptr == WALL_UFO_HULL_DMG || *wptr == WALL_UFO_DOOR_CLOSED) {
@@ -1420,6 +1423,7 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
             for (y = 0; y < MAP_H && uz < 0; y++) {
                 for (x = 0; x < MAP_W; x++) {
                     if (g_map[z][y][x].floor_id == FLOOR_NONE) continue;
+                    if (z == 1 && (zone_map[y][x] == ZONE_LZ || g_map[z][y][x].floor_id == FLOOR_ARV_ROOF)) continue;
                     if (is_blocking_prop(g_map[z][y][x].obj_id)) continue;
                     if (!reach_mask[z][y][x]) {
                         uz = z; ux = x; uy = y;
@@ -1464,6 +1468,7 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
                 for (d = 0; d < 4; d++) {
                     int rx = px + odx[d], ry = py + ody[d];
                     if ((unsigned)rx >= MAP_W || (unsigned)ry >= MAP_H) continue;
+                    if (uz == 0 && (zone_map[py][px] == ZONE_LZ) != (zone_map[ry][rx] == ZONE_LZ)) continue;
                     if (reach_mask[uz][ry][rx]) {
                         open_edge_between(uz, px, py, rx, ry);
                         repaired = 1;
@@ -1480,6 +1485,7 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
                 for (d = 0; d < 4; d++) {
                     int rx = px + odx[d], ry = py + ody[d];
                     if ((unsigned)rx >= MAP_W || (unsigned)ry >= MAP_H) continue;
+                    if (uz == 0 && (zone_map[py][px] == ZONE_LZ) != (zone_map[ry][rx] == ZONE_LZ)) continue;
                     if (reach_mask[uz][ry][rx]) {
                         isomap_clear_prop_at(uz, py, px, OBJ_NONE, 0);
                         open_edge_between(uz, px, py, rx, ry);
@@ -1569,7 +1575,8 @@ static int tile_free_for_spawn(int x, int y, int z, const ProcSpawnPlan *plan, i
     uint8_t fid;
     if ((unsigned)x >= MAP_W || (unsigned)y >= MAP_H || (unsigned)z >= MAP_LEVS) return 0;
     fid = g_map[z][y][x].floor_id;
-    if (fid == FLOOR_NONE) return 0;
+    if (fid == FLOOR_NONE || fid == FLOOR_ARV_ROOF) return 0;
+    if (z > 0 && zone_map[y][x] == ZONE_LZ) return 0;
     if (fid >= FLOOR_UFO_ROOF_N && fid <= FLOOR_UFO_ROOF_W) return 0;
     if (g_map[z][y][x].obj_id != OBJ_NONE && g_map[z][y][x].obj_id != OBJ_RUBBLE) return 0;
     if (z > 0 && isomap_is_lift_obj(g_map[z - 1][y][x].obj_id)) return 0;
@@ -1613,48 +1620,82 @@ static int any_squad_has_los(int x, int y, int z, const ProcSpawnPlan *plan) {
     return 0;
 }
 
-/* Construct the hastily-armored Resistance Response Bus with exit ramp inside ZONE_LZ */
+static int tile_free_for_civ_spawn(int x, int y, int z, const ProcSpawnPlan *plan, int placed_civs) {
+    int i;
+    if (!tile_free_for_spawn(x, y, z, plan, plan->num_aliens)) return 0;
+    if (zone_map[y][x] == ZONE_LZ || zone_map[y][x] == ZONE_UFO) return 0;
+    if (g_ufo_rect.valid && x >= g_ufo_rect.x0 && x <= g_ufo_rect.x1 &&
+        y >= g_ufo_rect.y0 && y <= g_ufo_rect.y1) return 0;
+    for (i = 0; i < placed_civs; i++) {
+        if (plan->civ_x[i] == x && plan->civ_y[i] == y && plan->civ_z[i] == z) return 0;
+    }
+    return 1;
+}
+
+static int any_alien_has_los(int x, int y, int z, const ProcSpawnPlan *plan) {
+    int i;
+    for (i = 0; i < plan->num_aliens; i++) {
+        int d = abs(x - plan->alien_x[i]) + abs(y - plan->alien_y[i]);
+        if (d <= 16 && isomap_has_los(plan->alien_x[i], plan->alien_y[i], plan->alien_z[i], x, y, z)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Construct the DUFF-COM Armored Response Vehicle (ARV) with a 2-tile side deployment doorway inside ZONE_LZ */
 static void place_armored_response_vehicle(void) {
-    int x, y;
+    static const uint8_t side_closed[5] = {
+        WALL_ARV_WHEEL, WALL_ARV_HULL, WALL_ARV_HULL, WALL_ARV_WIN, WALL_ARV_WHEEL
+    };
+    static const uint8_t side_open[5] = {
+        WALL_ARV_WHEEL, WALL_ARV_DOOR_OPEN, WALL_ARV_DOOR_OPEN, WALL_ARV_WIN, WALL_ARV_WHEEL
+    };
+    int x, y, i;
+
     for (y = g_lz_y0; y <= g_lz_y1; y++) {
         for (x = g_lz_x0; x <= g_lz_x1; x++) {
             isomap_clear_prop_at(0, y, x, OBJ_NONE, 0);
             g_map[0][y][x].wall_west  = WALL_NONE;
             g_map[0][y][x].wall_north = WALL_NONE;
-            g_map[0][y][x].floor_id   = FLOOR_WOOD;     /* Welded floorboards inside bus */
-            g_map[1][y][x].floor_id   = FLOOR_ROOF_TAR; /* Welded sheet-metal roof */
+            g_map[0][y][x].floor_id   = FLOOR_ARV_DECK;
+            g_map[1][y][x].wall_west  = WALL_NONE;
+            g_map[1][y][x].wall_north = WALL_NONE;
+            g_map[1][y][x].floor_id   = FLOOR_ARV_ROOF;
         }
     }
     for (x = g_lz_x0; x <= g_lz_x1; x++) g_map[0][g_lz_y1 + 1][x].wall_north = WALL_NONE;
     for (y = g_lz_y0; y <= g_lz_y1; y++) g_map[0][y][g_lz_x1 + 1].wall_west  = WALL_NONE;
 
-    /* Enclose bus hull in welded steel plates, leaving the exit ramp side open! */
-    for (x = g_lz_x0; x <= g_lz_x1; x++) {
-        if (g_lz_side != 0) {
-            g_map[0][g_lz_y0][x].wall_north = (x == (g_lz_x0 + g_lz_x1) / 2) ? WALL_STEEL_DMG : WALL_STEEL;
-        } else {
-            g_map[0][g_lz_y0][x].floor_id   = FLOOR_ASPHALT; /* Exit ramp lip */
-            g_map[1][g_lz_y0][x].floor_id   = FLOOR_NONE;
+    if (g_lz_side == 0 || g_lz_side == 1) {
+        /* 5x3 Horizontal ARV (Rear at West x0, Front Cab/Grille at East x1+1) */
+        for (i = 0; i < 5; i++) {
+            x = g_lz_x0 + i;
+            g_map[0][g_lz_y0][x].wall_north     = (g_lz_side == 0) ? side_open[i] : side_closed[i];
+            g_map[0][g_lz_y1 + 1][x].wall_north = (g_lz_side == 1) ? side_open[i] : side_closed[i];
+            if (i == 1 || i == 2) {
+                int out_y = (g_lz_side == 0) ? (g_lz_y0 - 1) : (g_lz_y1 + 1);
+                mark_threshold_clear(x, out_y);
+            }
         }
-        if (g_lz_side != 1) {
-            g_map[0][g_lz_y1 + 1][x].wall_north = (x == (g_lz_x0 + g_lz_x1) / 2) ? WALL_STEEL_DMG : WALL_STEEL;
-        } else {
-            g_map[0][g_lz_y1][x].floor_id   = FLOOR_ASPHALT;
-            g_map[1][g_lz_y1][x].floor_id   = FLOOR_NONE;
+        for (y = g_lz_y0; y <= g_lz_y1; y++) {
+            g_map[0][y][g_lz_x0].wall_west     = WALL_ARV_HULL;
+            g_map[0][y][g_lz_x1 + 1].wall_west = WALL_ARV_FRONT;
         }
-    }
-    for (y = g_lz_y0; y <= g_lz_y1; y++) {
-        if (g_lz_side != 3) {
-            g_map[0][y][g_lz_x0].wall_west = (y == (g_lz_y0 + g_lz_y1) / 2) ? WALL_STEEL_DMG : WALL_STEEL;
-        } else {
-            g_map[0][y][g_lz_x0].floor_id  = FLOOR_ASPHALT;
-            g_map[1][y][g_lz_x0].floor_id  = FLOOR_NONE;
+    } else {
+        /* 3x5 Vertical ARV (Rear at North y0, Front Cab/Grille at South y1+1) */
+        for (i = 0; i < 5; i++) {
+            y = g_lz_y0 + i;
+            g_map[0][y][g_lz_x0].wall_west     = (g_lz_side == 3) ? side_open[i] : side_closed[i];
+            g_map[0][y][g_lz_x1 + 1].wall_west = (g_lz_side == 2) ? side_open[i] : side_closed[i];
+            if (i == 1 || i == 2) {
+                int out_x = (g_lz_side == 3) ? (g_lz_x0 - 1) : (g_lz_x1 + 1);
+                mark_threshold_clear(out_x, y);
+            }
         }
-        if (g_lz_side != 2) {
-            g_map[0][y][g_lz_x1 + 1].wall_west = (y == (g_lz_y0 + g_lz_y1) / 2) ? WALL_STEEL_DMG : WALL_STEEL;
-        } else {
-            g_map[0][y][g_lz_x1].floor_id  = FLOOR_ASPHALT;
-            g_map[1][y][g_lz_x1].floor_id  = FLOOR_NONE;
+        for (x = g_lz_x0; x <= g_lz_x1; x++) {
+            g_map[0][g_lz_y0][x].wall_north     = WALL_ARV_HULL;
+            g_map[0][g_lz_y1 + 1][x].wall_north = WALL_ARV_FRONT;
         }
     }
 }
@@ -1919,6 +1960,81 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
         plan->alien_y[a]    = ay;
         plan->alien_z[a]    = az;
         plan->alien_dir[a]  = calc_dir_vec((MAP_W / 2) - ax, (MAP_H / 2) - ay);
+    }
+
+    /* Spawn a random number of Coopersburg Civilians (3..6 in town/rural/steel, 2..4 in Base Defense) */
+    {
+        static const char *civ_male_names[8] = {
+            "CIV. MILLER", "CIV. SCHULTZ", "CIV. YODER", "CIV. KLINE",
+            "CIV. LANDIS", "ARCADE KID", "PA FARMER", "MILL WORKER"
+        };
+        static const char *civ_fem_names[8] = {
+            "CIV. DIETRICH", "CIV. HOFFMAN", "CIV. WEAVER", "CIV. ZIEGLER",
+            "WAITRESS", "LOCAL SHOPPER", "TOWN RESIDENT", "COOPERSBURG TEEN"
+        };
+        static const char *base_male_names[4] = {
+            "DR. FREEMAN", "TECH SNYDER", "ENG. KAUFFMAN", "CLERK ROTH"
+        };
+        static const char *base_fem_names[4] = {
+            "DR. VANCE", "MEDIC HELLER", "ANALYST BACH", "TECH WAGNER"
+        };
+        int c_count = (biome_id == BIOME_BASE_DEFENSE) ? (2 + (rand() % 3)) : (3 + (rand() % 4));
+        int c;
+        if (c_count > 6) c_count = 6;
+        plan->num_civilians = c_count;
+
+        for (c = 0; c < c_count; c++) {
+            int gender = (c & 1) ^ (rand() & 1);
+            int cx_sp = MAP_W / 2, cy_sp = MAP_H / 2, cz_sp = 0;
+            int found = 0, tries;
+
+            if (biome_id == BIOME_BASE_DEFENSE) {
+                plan->civ_name[c] = gender ? base_fem_names[(c + rand()) & 3]
+                                           : base_male_names[(c + rand()) & 3];
+            } else {
+                plan->civ_name[c] = gender ? civ_fem_names[(c * 3 + rand()) & 7]
+                                           : civ_male_names[(c * 3 + rand()) & 7];
+            }
+
+            /* Prefer spawning civilians inside local buildings (Diners, Arcades, Houses, Barns) */
+            if (g_num_bldgs > 0 && (c < c_count - 1 || (rand() & 1))) {
+                for (tries = 0; tries < 90 && !found; tries++) {
+                    BldgRect b = g_bldgs[rand() % g_num_bldgs];
+                    int tx = rrange(b.x0, b.x1), ty = rrange(b.y0, b.y1);
+                    if (!tile_free_for_civ_spawn(tx, ty, 0, plan, c)) continue;
+                    if (tries < 60 && min_other_alien_dist(tx, ty, plan, plan->num_aliens) < 6) continue;
+                    if (tries < 70 && any_alien_has_los(tx, ty, 0, plan)) continue;
+                    cx_sp = tx; cy_sp = ty; cz_sp = 0; found = 1;
+                }
+            }
+
+            /* Otherwise place along streets, sidewalks, yards, or fields */
+            for (tries = 0; tries < 180 && !found; tries++) {
+                int tx = rrange(2, MAP_W - 3), ty = rrange(2, MAP_H - 3);
+                if (!tile_free_for_civ_spawn(tx, ty, 0, plan, c)) continue;
+                if (tries < 120 && min_other_alien_dist(tx, ty, plan, plan->num_aliens) < 7) continue;
+                if (tries < 140 && any_alien_has_los(tx, ty, 0, plan)) continue;
+                cx_sp = tx; cy_sp = ty; cz_sp = 0; found = 1;
+            }
+
+            /* Fallback deterministic scan */
+            if (!found) {
+                int tx, ty;
+                for (ty = 1; ty <= MAP_H - 2 && !found; ty++) {
+                    for (tx = 1; tx <= MAP_W - 2 && !found; tx++) {
+                        if (tile_free_for_civ_spawn(tx, ty, 0, plan, c)) {
+                            cx_sp = tx; cy_sp = ty; cz_sp = 0; found = 1;
+                        }
+                    }
+                }
+            }
+
+            plan->civ_gender[c] = gender;
+            plan->civ_x[c]      = cx_sp;
+            plan->civ_y[c]      = cy_sp;
+            plan->civ_z[c]      = cz_sp;
+            plan->civ_dir[c]    = rand() & 7;
+        }
     }
 }
 

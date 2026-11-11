@@ -368,10 +368,14 @@ void hud_render(void) {
     {
         int wep_hov = (g_input.mx >= 4 && g_input.mx < 48 && g_input.my >= 156 && g_input.my < 194);
         uint8_t bg = g_battle.fire_mode ? 38 : (wep_hov ? 66 : 168);
-        int icon_id = (g_battle.fire_mode == 4) ? 3 : (item_legacy_weapon_class(u->weapon_id) & 3);
+        /* Show the actual equipped item's inventory icon (grenade/flare while in those modes) */
+        int icon_item = (g_battle.fire_mode == 4) ? ((u->grenade_id >= 0) ? u->grenade_id : ITEM_FRAG_GRENADE)
+                      : (g_battle.fire_mode == 5) ? ITEM_FLARE
+                      : u->weapon_id;
         const ItemDef *wd = item_get_def(u->weapon_id);
         vga_rect_bevel(4, 156, 44, 38, bg, (wep_hov || g_battle.fire_mode) ? 96 : 163, 172);
-        vga_blit_ui(6, 160, 40, 24, spr_weapons[icon_id]);
+        if (icon_item >= 0 && icon_item < ITEM_COUNT)
+            vga_blit_ui(10, 167, ITEM_ICON_W, ITEM_ICON_H, spr_item_icons[icon_item]);
 
         if (g_battle.fire_mode == 0) {
             vga_print(6, 158, wd->short_name, 96);

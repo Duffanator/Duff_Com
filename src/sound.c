@@ -424,6 +424,28 @@ static void build_procedural_fallbacks(void) {
         ph += 6.2831853 * f / SFX_SAMPLE_RATE;
         g_sfx[SFX_ID_ALERT].pcm[i] = clamp_u8((int)(sin(ph) * 75.0));
     }
+
+    /* 17. MALE CIVILIAN PANIC SCREAM ("YAAAH!") */
+    n = 5600; alloc_proc_sfx(SFX_ID_CIV_SCREAM_M, n);
+    ph = 0.0;
+    for (i = 0; i < n && g_sfx[SFX_ID_CIV_SCREAM_M].pcm; i++) {
+        double t = (double)i / SFX_SAMPLE_RATE;
+        double f = (t < 0.14) ? (290.0 + t * 1100.0) : (444.0 * exp(-(t - 0.14) * 1.65) + 145.0);
+        double env = sin(3.14159 * (double)i / n);
+        ph += 6.2831853 * (f + 14.0 * sin(t * 58.0)) / SFX_SAMPLE_RATE;
+        g_sfx[SFX_ID_CIV_SCREAM_M].pcm[i] = clamp_u8((int)((sin(ph) * 50.0 + sin(ph * 2.0) * 44.0 + sin(ph * 3.0) * 26.0 + noise_s8() * 0.20) * env));
+    }
+
+    /* 18. FEMALE CIVILIAN PANIC SHRIEK ("EEEEAAAH!") */
+    n = 5800; alloc_proc_sfx(SFX_ID_CIV_SCREAM_F, n);
+    ph = 0.0;
+    for (i = 0; i < n && g_sfx[SFX_ID_CIV_SCREAM_F].pcm; i++) {
+        double t = (double)i / SFX_SAMPLE_RATE;
+        double f = (t < 0.12) ? (580.0 + t * 2100.0) : (832.0 * exp(-(t - 0.12) * 1.45) + 310.0);
+        double env = sin(3.14159 * (double)i / n);
+        ph += 6.2831853 * (f + 22.0 * sin(t * 68.0)) / SFX_SAMPLE_RATE;
+        g_sfx[SFX_ID_CIV_SCREAM_F].pcm[i] = clamp_u8((int)((sin(ph) * 58.0 + sin(ph * 2.0) * 42.0 + sin(ph * 3.0) * 20.0 + noise_s8() * 0.16) * env));
+    }
 }
 
 static void load_wav_overrides(void) {
@@ -443,7 +465,9 @@ static void load_wav_overrides(void) {
         "MUTONDIE.WAV",
         "MANDIE.WAV",
         "FEMDIE.WAV",
-        "ALERT.WAV"
+        "ALERT.WAV",
+        "CIVSCRM.WAV",
+        "CIVSCRF.WAV"
     };
     int i;
     for (i = 0; i < SFX_COUNT; i++) {
@@ -554,6 +578,8 @@ void sound_play(int sfx_id) {
         case SFX_ID_MAN_DIE:     sfx_beep(260, 65); break;
         case SFX_ID_FEM_DIE:     sfx_beep(460, 65); break;
         case SFX_ID_ALERT:       sfx_beep(880, 30); break;
+        case SFX_ID_CIV_SCREAM_M:sfx_beep(520, 55); break;
+        case SFX_ID_CIV_SCREAM_F:sfx_beep(940, 55); break;
     }
 }
 
@@ -564,7 +590,7 @@ void sound_play_weapon(int weapon_id) {
 }
 
 void sound_play_death(int faction, int unit_type, int gender) {
-    if (faction == 0) {
+    if (faction == 0 || faction == 2) {
         sound_play(gender ? SFX_ID_FEM_DIE : SFX_ID_MAN_DIE);
     } else if (unit_type == 2) {
         sound_play(SFX_ID_FLOATER_DIE);
@@ -573,6 +599,10 @@ void sound_play_death(int faction, int unit_type, int gender) {
     } else {
         sound_play(SFX_ID_ALIEN_DIE);
     }
+}
+
+void sound_play_civ_scream(int gender) {
+    sound_play(gender ? SFX_ID_CIV_SCREAM_F : SFX_ID_CIV_SCREAM_M);
 }
 
 void sfx_beep(int freq_hz, int duration_ms) {

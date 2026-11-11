@@ -23,6 +23,8 @@ enum {
     SFX_ID_MAN_DIE,     /* Male DUFF-COM operative death scream */
     SFX_ID_FEM_DIE,     /* Female DUFF-COM operative death scream */
     SFX_ID_ALERT,       /* Alien spotted / Reaction Fire / Low TU alert */
+    SFX_ID_CIV_SCREAM_M,/* Male Civilian panic scream when spotting an alien */
+    SFX_ID_CIV_SCREAM_F,/* Female Civilian panic scream when spotting an alien */
     SFX_COUNT
 };
 
@@ -35,6 +37,7 @@ int  sound_is_sb_active(void);
 void sound_play(int sfx_id);
 void sound_play_weapon(int weapon_id);
 void sound_play_death(int faction, int unit_type, int gender);
+void sound_play_civ_scream(int gender);
 
 /* Convenience tactical audio helpers */
 void sfx_beep(int freq_hz, int duration_ms);

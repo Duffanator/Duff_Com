@@ -15,6 +15,14 @@ typedef struct {
     int alien_z[8];
     int alien_dir[8];
     const char *alien_name[8];
+
+    int num_civilians;
+    int civ_gender[6]; /* 0 = Male Civilian, 1 = Female Civilian */
+    int civ_x[6];
+    int civ_y[6];
+    int civ_z[6];
+    int civ_dir[6];
+    const char *civ_name[6];
 } ProcSpawnPlan;
 
 /* Procedurally generate a thematic randomized battleground for `biome_id`

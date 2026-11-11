@@ -732,6 +732,28 @@ void campaign_on_mission_complete(void) {
     g_camp.cryo_pods     += g_battle.cryo_recovered;
     g_camp.tech_pods     += g_battle.pods_recovered;
     g_camp.alien_corpses += g_battle.corpses_recovered;
+    g_camp.total_map_damage += g_battle.map_damage;
+
+    /* Count rescued vs lost civilians and update total campaign score */
+    {
+        int civ_rescued = 0;
+        if (mission_won) {
+            civ_rescued = g_battle.civilians_saved;
+        } else {
+            for (i = 0; i < MAX_UNITS; i++) {
+                if (g_units[i].active && g_units[i].faction == FACTION_CIVILIAN &&
+                    isomap_unit_in_bus(&g_units[i])) {
+                    civ_rescued++;
+                }
+            }
+        }
+        g_battle.civilians_saved       = civ_rescued;
+        g_camp.total_civilians_saved  += civ_rescued;
+        g_camp.total_civilians_killed += g_battle.civilians_killed;
+        g_camp.total_score            += g_battle.mission_score;
+        g_camp.money                  += civ_rescued * 120 - g_battle.civilians_killed_by_xcom * 250;
+        if (g_camp.money < 0) g_camp.money = 0;
+    }
 
     /* Sync recovered materials, artifacts & fallen alien weapons/ammo/corpses into Base Stores! */
     g_camp.stores[ITEM_ELERIUM]  += g_battle.elerium_recovered;
@@ -897,8 +919,11 @@ static void show_alien_victory_gameover_screen(void) {
 
     snprintf(buf, sizeof(buf), "ALIENS KILLED: %d   OPERATIVES KIA: %d",
              g_camp.total_kills, g_camp.total_kia);
-    vga_print_shadow(38, 122, buf, 96, 15);
-    vga_hline(34, 286, 136, 68);
+    vga_print_shadow(38, 118, buf, 96, 15);
+    snprintf(buf, sizeof(buf), "CIVS SAVED: %d  LOST: %d  SCORE: %d",
+             g_camp.total_civilians_saved, g_camp.total_civilians_killed, g_camp.total_score);
+    vga_print_shadow(38, 129, buf, 80, 15);
+    vga_hline(34, 286, 140, 68);
 
     vga_print_shadow(44, 154, "CLICK OR PRESS ANY BUTTON TO RESET", 96, 15);
     vga_flip();
@@ -1357,9 +1382,11 @@ void campaign_render(void) {
 
     /* Bottom Status & Resource Strip */
     vga_rect_bevel(0, 168, SCREEN_W, 32, 166, 162, 171);
-    snprintf(res_buf, sizeof(res_buf), "$%d ALLOY:%d ELER:%d WINS:%d KILLS:%d KIA:%d",
+    snprintf(res_buf, sizeof(res_buf), "$%d ALLOY:%d ELER:%d CIV:%d/%d SCORE:%d",
              g_camp.money, g_camp.alloys, g_camp.elerium,
-             g_camp.missions_won, g_camp.total_kills, g_camp.total_kia);
+             g_camp.total_civilians_saved,
+             g_camp.total_civilians_saved + g_camp.total_civilians_killed,
+             g_camp.total_score);
     vga_print_shadow(8, 173, res_buf, 80, 15);
     vga_print(8, 185, g_camp.notice, 96);
 }

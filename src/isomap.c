@@ -113,13 +113,35 @@ void isomap_drop_ground_item(int x, int y, int z, int item_id) {
     }
 }
 
+static int calc_mission_score(int squad_alive) {
+    int kia = MAX_SQUAD_SIZE - squad_alive;
+    int alien_civ_kills = g_battle.civilians_killed - g_battle.civilians_killed_by_xcom;
+    int score = 0;
+
+    if (kia < 0) kia = 0;
+    if (alien_civ_kills < 0) alien_civ_kills = 0;
+
+    score += (g_battle.mission_ended == 1) ? 150 : (g_battle.mission_ended == 2 ? -150 : 0);
+    score += squad_alive * 50 - kia * 100;
+    score += g_battle.aliens_killed * 40 + g_battle.corpses_recovered * 15;
+    score += (g_battle.nav_recovered + g_battle.cryo_recovered + g_battle.pods_recovered) * 25;
+    score += g_battle.civilians_saved * 45;
+    score -= alien_civ_kills * 35;
+    score -= g_battle.civilians_killed_by_xcom * 80;
+    score -= (g_battle.map_damage / 2);
+    return score;
+}
+
 static void check_victory_state(void) {
-    int i, z, y, x, k, aliens_alive = 0, squad_alive = 0;
+    int i, z, y, x, k, aliens_alive = 0, squad_alive = 0, civs_alive = 0;
     for (i = 0; i < MAX_UNITS; i++) {
         if (!g_units[i].active) continue;
-        if (g_units[i].faction == 0) squad_alive++;
-        else aliens_alive++;
+        if (g_units[i].faction == FACTION_DUFFCOM) squad_alive++;
+        else if (g_units[i].faction == FACTION_ALIEN) aliens_alive++;
+        else if (g_units[i].faction == FACTION_CIVILIAN) civs_alive++;
     }
+    g_battle.civilians_saved = civs_alive;
+
     if (aliens_alive == 0 && g_battle.mission_ended == 0) {
         int nav_cnt = 0, cryo_cnt = 0, pod_cnt = 0, core_cnt = 0, hull_cnt = 0, corpse_cnt = 0;
         for (z = 0; z < MAP_LEVS; z++) {
@@ -147,7 +169,7 @@ static void check_victory_state(void) {
         }
 
         for (i = 0; i < MAX_UNITS; i++) {
-            if (g_units[i].is_corpse && g_units[i].faction == 1) corpse_cnt++;
+            if (g_units[i].is_corpse && g_units[i].faction == FACTION_ALIEN) corpse_cnt++;
         }
         g_battle.mission_ended     = 1;
         g_battle.nav_recovered     = nav_cnt;
@@ -156,13 +178,17 @@ static void check_victory_state(void) {
         g_battle.corpses_recovered = corpse_cnt;
         g_battle.elerium_recovered += (core_cnt > 0 ? 15 * core_cnt : 8) + pod_cnt * 4;
         g_battle.alloys_recovered  += (hull_cnt >= 14 ? 28 : 18) + pod_cnt * 5;
+        g_battle.mission_score     = calc_mission_score(squad_alive);
         game_wait_frames(16);
         set_status("SECTOR CLEARED! UFO & TECH SECURED!");
         sfx_beep(660, 80);
         sfx_beep(880, 120);
     } else if (squad_alive == 0 && g_battle.mission_ended == 0) {
         g_battle.mission_ended = 2;
+        g_battle.mission_score = calc_mission_score(0);
         set_status("SQUAD WIPED OUT! MISSION FAILED!");
+    } else {
+        g_battle.mission_score = calc_mission_score(squad_alive);
     }
 }
 
@@ -225,7 +251,7 @@ static void spawn_unit(int idx, int faction, int type, const char *name,
     strncpy(u->name, name, sizeof(u->name) - 1);
     u->portrait_id = portrait_id % NUM_PORTRAITS;
     u->gender = (u->portrait_id >= 6) ? 1 : 0;
-    if (faction == 0) {
+    if (faction == FACTION_DUFFCOM) {
         u->sprite_id   = gfx_portrait_to_unit_sprite(u->portrait_id);
         u->weapon_id   = item_is_weapon(weapon_id) ? weapon_id : ITEM_ASSAULT_RIFLE;
         u->sidearm_id  = ITEM_PISTOL;
@@ -234,6 +260,16 @@ static void spawn_unit(int idx, int faction, int type, const char *name,
         u->grenade_id  = ITEM_FRAG_GRENADE;
         u->grenades    = 2;
         u->flares      = 2;
+    } else if (faction == FACTION_CIVILIAN) {
+        u->gender      = portrait_id ? 1 : 0;
+        u->sprite_id   = u->gender ? UNIT_SPR_CIV_FEM : UNIT_SPR_CIV_MALE;
+        u->weapon_id   = ITEM_NONE;
+        u->sidearm_id  = ITEM_NONE;
+        u->ammo        = 0;
+        u->extra_clips = 0;
+        u->grenade_id  = ITEM_NONE;
+        u->grenades    = 0;
+        u->flares      = 0;
     } else {
         u->sprite_id = (type == 1) ? UNIT_SPR_SECTOID :
                        (type == 2) ? UNIT_SPR_FLOATER : UNIT_SPR_MUTON;
@@ -250,16 +286,21 @@ static void spawn_unit(int idx, int faction, int type, const char *name,
     u->rank = RANK_ROOKIE;
     u->xp_start = 0;
     u->xp_gained = 0;
-    u->tu_max = (faction == 0) ? 53 : (type == 3 ? 62 : 54);
+    u->tu_max = (faction == FACTION_DUFFCOM) ? 53 :
+                (faction == FACTION_CIVILIAN ? 46 : (type == 3 ? 62 : 54));
     u->tu = u->tu_max;
-    u->hp_max = (faction == 0) ? 41 : (type == 3 ? 65 : (type == 2 ? 45 : 32));
+    u->hp_max = (faction == FACTION_DUFFCOM) ? 41 :
+                (faction == FACTION_CIVILIAN ? 26 : (type == 3 ? 65 : (type == 2 ? 45 : 32)));
     u->hp = u->hp_max;
-    u->energy_max = (faction == 0) ? 56 : 60;
+    u->energy_max = (faction == FACTION_DUFFCOM) ? 56 : (faction == FACTION_CIVILIAN ? 48 : 60);
     u->energy = u->energy_max;
     u->morale = 100;
-    u->firing_acc = (faction == 0) ? 57 : (type == 3 ? 65 : 52);
-    u->throw_acc  = (faction == 0) ? 56 : (type == 3 ? 62 : 50);
-    u->reactions  = (faction == 0) ? 46 : (type == 3 ? 55 : 42);
+    u->firing_acc = (faction == FACTION_DUFFCOM) ? 57 :
+                    (faction == FACTION_CIVILIAN ? 0 : (type == 3 ? 65 : 52));
+    u->throw_acc  = (faction == FACTION_DUFFCOM) ? 56 :
+                    (faction == FACTION_CIVILIAN ? 0 : (type == 3 ? 62 : 50));
+    u->reactions  = (faction == FACTION_DUFFCOM) ? 46 :
+                    (faction == FACTION_CIVILIAN ? 15 : (type == 3 ? 55 : 42));
     g_map[z][y][x].unit_idx = (int8_t)idx;
 
 }
@@ -269,7 +310,7 @@ int isomap_is_door_closed(uint8_t wall_id) {
 }
 
 int isomap_is_door_open(uint8_t wall_id) {
-    return (wall_id == WALL_DOOR_OPEN || wall_id == WALL_UFO_DOOR_OPEN);
+    return (wall_id == WALL_DOOR_OPEN || wall_id == WALL_UFO_DOOR_OPEN || wall_id == WALL_ARV_DOOR_OPEN);
 }
 
 int isomap_is_lift_obj(uint8_t obj_id) {
@@ -301,8 +342,13 @@ uint8_t isomap_wall_max_hp(uint8_t wall_id) {
         case WALL_DINER_DMG:        return 85;
         case WALL_STEEL:
         case WALL_STEEL_DMG:        return 130;
+        case WALL_ARV_DOOR_OPEN:    return 80;
+        case WALL_ARV_WIN:          return 140;
         case WALL_UFO_HULL:
-        case WALL_UFO_HULL_DMG:     return 160;
+        case WALL_UFO_HULL_DMG:
+        case WALL_ARV_HULL:
+        case WALL_ARV_WHEEL:
+        case WALL_ARV_FRONT:        return 160;
         default:                    return 50;
     }
 }
@@ -325,6 +371,10 @@ int isomap_wall_blocks_los(uint8_t wall_id) {
         case WALL_UFO_HULL:
         case WALL_UFO_HULL_DMG:
         case WALL_UFO_DOOR_CLOSED:
+        case WALL_ARV_HULL:
+        case WALL_ARV_WIN:
+        case WALL_ARV_WHEEL:
+        case WALL_ARV_FRONT:
             return 1;
         default:
             return 0;
@@ -339,6 +389,11 @@ const char *isomap_wall_name(uint8_t wall_id) {
         case WALL_DOOR_OPEN:        return "DOOR";
         case WALL_UFO_DOOR_CLOSED:
         case WALL_UFO_DOOR_OPEN:    return "AIRLOCK";
+        case WALL_ARV_DOOR_OPEN:    return "ARV BAY";
+        case WALL_ARV_WIN:          return "ARV CAB";
+        case WALL_ARV_WHEEL:        return "ARV TIRE";
+        case WALL_ARV_FRONT:        return "ARV NOSE";
+        case WALL_ARV_HULL:         return "ARV HULL";
         case WALL_BARN_WOOD:
         case WALL_BARN_DMG:         return "WOOD";
         case WALL_BRICK_WIN:
@@ -418,6 +473,10 @@ void isomap_clear_prop_at(int z, int y, int x, uint8_t new_obj, uint8_t min_smok
     if ((unsigned)x >= MAP_W || (unsigned)y >= MAP_H || (unsigned)z >= MAP_LEVS) return;
     has_partner = isomap_get_vehicle_partner(x, y, z, &px, &py);
 
+    if (new_obj == OBJ_RUBBLE && g_map[z][y][x].obj_id != OBJ_NONE &&
+        g_map[z][y][x].obj_id != OBJ_RUBBLE && g_map[z][y][x].obj_id != OBJ_FLARE) {
+        g_battle.map_damage += isomap_is_vehicle_obj(g_map[z][y][x].obj_id) ? 10 : 5;
+    }
     g_map[z][y][x].obj_id = new_obj;
     if (min_smoke > 0 && g_map[z][y][x].smoke < min_smoke) {
         g_map[z][y][x].smoke = min_smoke;
@@ -465,6 +524,7 @@ static int damage_wall_edge(int z, int wy, int wx, int is_north, int dmg, int si
                              isomap_is_door_closed(*wptr) || isomap_is_door_open(*wptr));
         *wptr   = WALL_NONE;
         *hp_ptr = 0;
+        g_battle.map_damage += 8;
 
         if (g_map[z][wy][wx].floor_id != FLOOR_NONE &&
             g_map[z][wy][wx].obj_id == OBJ_NONE &&
@@ -486,6 +546,7 @@ static int damage_wall_edge(int z, int wy, int wx, int is_north, int dmg, int si
     }
 
     *hp_ptr = (uint8_t)rem;
+    g_battle.map_damage += 2;
     if (*wptr == WALL_BRICK_WIN) {
         *wptr = (rem * 2 <= max_hp) ? WALL_BRICK_DMG : WALL_BRICK_BROKEN;
     } else if (*wptr == WALL_DINER_GLASS) {
@@ -769,9 +830,21 @@ void isomap_start_mission(int biome_id, int night_mode) {
     isomap_load_roster();
 
     for (i = 0; i < plan.num_aliens && (5 + i) < MAX_UNITS; i++) {
-        spawn_unit(5 + i, 1, plan.alien_type[i], plan.alien_name[i],
+        spawn_unit(5 + i, FACTION_ALIEN, plan.alien_type[i], plan.alien_name[i],
                    plan.alien_x[i], plan.alien_y[i], plan.alien_z[i],
                    plan.alien_dir[i], 2, 0);
+    }
+
+    g_battle.civilians_total          = plan.num_civilians;
+    g_battle.civilians_saved          = plan.num_civilians;
+    g_battle.civilians_killed         = 0;
+    g_battle.civilians_killed_by_xcom = 0;
+    g_battle.map_damage               = 0;
+    g_battle.mission_score            = 0;
+    for (i = 0; i < plan.num_civilians && (5 + plan.num_aliens + i) < MAX_UNITS; i++) {
+        spawn_unit(5 + plan.num_aliens + i, FACTION_CIVILIAN, 4, plan.civ_name[i],
+                   plan.civ_x[i], plan.civ_y[i], plan.civ_z[i],
+                   plan.civ_dir[i], ITEM_NONE, plan.civ_gender[i]);
     }
 
     g_battle.cur_x = g_units[0].x;
@@ -917,6 +990,8 @@ static int check_reaction_fire_against(int mover_idx) {
         Unit *watcher = &g_units[i];
         int req_tu = 12;
         if (!watcher->active || watcher->faction == m->faction) continue;
+        if (watcher->faction == FACTION_CIVILIAN) continue;
+        if (watcher->faction == FACTION_DUFFCOM && m->faction != FACTION_ALIEN) continue;
         if (watcher->tu < req_tu) continue;
         if (watcher->faction == 0 && g_map[m->z][m->y][m->x].fog != FOG_VISIBLE) continue;
         if (abs(watcher->x - m->x) + abs(watcher->y - m->y) > 12) continue;
@@ -1140,18 +1215,30 @@ static void kill_unit(int victim_idx, int killer_idx) {
         int kill_xp = 0;
         if (killer_idx >= 0 && killer_idx < MAX_UNITS && killer_idx != victim_idx &&
             g_units[killer_idx].faction != v->faction) {
-            g_units[killer_idx].kills++;
-            if (g_units[killer_idx].faction == 0 && v->faction == 1) {
+            if (v->faction == FACTION_ALIEN || g_units[killer_idx].faction == FACTION_ALIEN) {
+                g_units[killer_idx].kills++;
+            }
+            if (g_units[killer_idx].faction == FACTION_DUFFCOM && v->faction == FACTION_ALIEN) {
                 kill_xp = operative_kill_xp(v->unit_type);
                 g_units[killer_idx].xp_gained += kill_xp;
             }
         }
-        if (v->faction == 1) {
+        if (v->faction == FACTION_ALIEN) {
             g_battle.aliens_killed++;
             if (kill_xp > 0) {
                 snprintf(msg, sizeof(msg), "%s ELIMINATED! (+%d XP)", v->name, kill_xp);
             } else {
                 snprintf(msg, sizeof(msg), "%s ELIMINATED!", v->name);
+            }
+        } else if (v->faction == FACTION_CIVILIAN) {
+            g_battle.civilians_killed++;
+            if (g_battle.civilians_saved > 0) g_battle.civilians_saved--;
+            if (killer_idx >= 0 && killer_idx < MAX_UNITS &&
+                g_units[killer_idx].faction == FACTION_DUFFCOM) {
+                g_battle.civilians_killed_by_xcom++;
+                snprintf(msg, sizeof(msg), "FRIENDLY FIRE! %s KILLED!", v->name);
+            } else {
+                snprintf(msg, sizeof(msg), "CIVILIAN %s KILLED!", v->name);
             }
         } else {
             snprintf(msg, sizeof(msg), "%s KIA!", v->name);
@@ -1531,13 +1618,42 @@ static void play_impact_splash(int splash_type, int cx, int cy) {
     }
 }
 
+/* Pan the tactical camera along with a flying projectile so shots travelling toward
+ * or beyond the viewport edges remain smoothly framed all the way to impact! */
+static void track_camera_for_projectile(int wx, int wy, int vx, int vy, int allow_back_snap) {
+    int sx = g_battle.cam_x + wx;
+    int sy = g_battle.cam_y + wy;
+    int left_lim  = (vx < 0) ? 68 : ((vx == 0 && allow_back_snap) ? 48 : (allow_back_snap ? 28 : -32000));
+    int right_lim = (vx > 0) ? (SCREEN_W - 68)   : ((vx == 0 && allow_back_snap) ? (SCREEN_W - 48)   : (allow_back_snap ? (SCREEN_W - 28)   : 32000));
+    int top_lim   = (vy < 0) ? 36 : ((vy == 0 && allow_back_snap) ? 28 : (allow_back_snap ? 18 : -32000));
+    int bot_lim   = (vy > 0) ? (VIEWPORT_H - 36) : ((vy == 0 && allow_back_snap) ? (VIEWPORT_H - 28) : (allow_back_snap ? (VIEWPORT_H - 18) : 32000));
+
+    if (sx < left_lim)       g_battle.cam_x += (left_lim - sx);
+    else if (sx > right_lim) g_battle.cam_x -= (sx - right_lim);
+
+    if (sy < top_lim)        g_battle.cam_y += (top_lim - sy);
+    else if (sy > bot_lim)   g_battle.cam_y -= (sy - bot_lim);
+
+    clamp_camera();
+}
+
 /* Smoothly fly directional projectile sprite from (x0, y0) to (x1, y1) across `frames` retraces */
 static void animate_proj_segment(int proj_type, int ang_idx, int x0, int y0, int x1, int y1, int frames) {
+    int wx0 = x0 - g_battle.cam_x;
+    int wy0 = y0 - g_battle.cam_y;
+    int wx1 = x1 - g_battle.cam_x;
+    int wy1 = y1 - g_battle.cam_y;
+    int vx  = wx1 - wx0;
+    int vy  = wy1 - wy0;
     int sub;
     if (frames < 1) frames = 1;
     for (sub = 1; sub <= frames; sub++) {
-        int bx = x0 + ((x1 - x0) * sub) / frames;
-        int by = y0 + ((y1 - y0) * sub) / frames;
+        int wx = wx0 + ((wx1 - wx0) * sub) / frames;
+        int wy = wy0 + ((wy1 - wy0) * sub) / frames;
+        int bx, by;
+        track_camera_for_projectile(wx, wy, vx, vy, 0);
+        bx = g_battle.cam_x + wx;
+        by = g_battle.cam_y + wy;
         isomap_render();
         hud_render();
         vga_blit_shaded(bx - (FX_W / 2), by - (FX_H / 2),
@@ -1548,16 +1664,11 @@ static void animate_proj_segment(int proj_type, int ang_idx, int x0, int y0, int
     }
 }
 
-/* Resolve projectile crossing a West (is_north=0) or North (is_north=1) wall edge.
- * Returns 1 if the projectile stops on the wall, or 0 if it continues onward. */
-static int resolve_shot_wall_edge(int wx, int wy, int z, int is_north,
-                                  int direct_aim, int stray_shot,
-                                  int proj_type, int ang_idx, int bolt_frames,
-                                  int wall_dmg, int surf_splash, int step_i,
-                                  int *prev_bx, int *prev_by) {
+/* Check whether a West (is_north=0) or North (is_north=1) wall edge stops a projectile or shatters as pass-through glass.
+ * Returns: 0 = passes through unimpeded, 1 = stops on wall, 2 = shatters intact glass pane and continues! */
+static int trace_shot_wall_edge(int wx, int wy, int z, int is_north,
+                                int direct_aim, int stray_shot) {
     uint8_t w = is_north ? g_map[z][wy][wx].wall_north : g_map[z][wy][wx].wall_west;
-    int wsx, wsy, wcx, wcy;
-    int is_intact_glass;
 
     if (w == WALL_NONE || isomap_is_door_open(w)) return 0;
 
@@ -1569,42 +1680,14 @@ static int resolve_shot_wall_edge(int wx, int wy, int z, int is_north,
         }
     }
 
-    isomap_tile_to_screen(wx, wy, z, &wsx, &wsy);
-    wcx = wsx + (is_north ? 24 : 8);
-    wcy = wsy - 6;
-    animate_proj_segment(proj_type, ang_idx, *prev_bx, *prev_by, wcx, wcy, bolt_frames);
-    *prev_bx = wcx;
-    *prev_by = wcy;
-
-    is_intact_glass = (w == WALL_BRICK_WIN || w == WALL_DINER_GLASS);
-
     /* Shooting AT a target behind intact glass shatters the pane and keeps flying! */
-    if (is_intact_glass && !direct_aim) {
-        int glass_shat = 0;
-        damage_wall_edge(z, wy, wx, is_north, 15, 0, &glass_shat);
-        wait_min_shot_frames(step_i);
-        sfx_glass();
-        play_impact_splash(SPLASH_GLASS, wcx, wcy);
-        return 0;
-    }
-
-    /* Direct wall/fence/door/frame impact: apply material HP damage and breach at 0 HP! */
-    {
-        int glass_shat = 0;
-        damage_wall_edge(z, wy, wx, is_north, wall_dmg, 0, &glass_shat);
-        wait_min_shot_frames(step_i);
-        if (is_intact_glass || glass_shat) {
-            sfx_glass();
-            play_impact_splash(SPLASH_GLASS, wcx, wcy);
-        } else {
-            sfx_hit();
-            play_impact_splash(surf_splash, wcx, wcy);
-        }
+    if ((w == WALL_BRICK_WIN || w == WALL_DINER_GLASS) && !direct_aim) {
+        return 2;
     }
     return 1;
 }
 
-/* True 3D Bresenham Raycast Weapon Projectile & Surface Splash Impact Handler */
+/* True 3D Bresenham Raycast Weapon Projectile & Straight-Line Flight Handler */
 static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int acc) {
     static const int barrel_dx[8] = {  6,  9,  6,  0, -6, -9, -6,  0 };
     static const int barrel_dy[8] = { -3,  0,  3,  6,  3,  0, -3, -6 };
@@ -1624,8 +1707,17 @@ static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int ac
                                                    (20 + (rand() % 9));
 
     int aim_has_target = 0;
-    int start_bx, start_by, end_sx, end_sy, prev_bx, prev_by, ang_idx;
+    int start_bx, start_by, hit_bx, hit_by, ang_idx;
     int bolt_frames = settings_bolt_frames();
+    int stop_kind = 6, stop_step = 0;
+    int hit_x = tx, hit_y = ty, hit_z = tz;
+    int hit_wall_x = 0, hit_wall_y = 0, hit_wall_z = 0, hit_wall_north = 0;
+    int hit_unit_idx = -1;
+    struct {
+        int step_i;
+        int z, wy, wx, is_north;
+    } glass_hits[MAP_W + MAP_H];
+    int num_glass_hits = 0, g, prev_step, total_steps, rem_frames;
 
     combat_anim_depth++;
 
@@ -1637,8 +1729,8 @@ static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int ac
     }
 
     if (stray_shot && aim_has_target) {
-        /* Guarantee a missed accuracy roll scatters off the target tile (tx, ty) */
-        static const int off_dx[4] = {  1, -1,  2, -2 };
+        /* Guarantee a missed accuracy roll scatters 1 tile off the target tile (tx, ty) */
+        static const int off_dx[4] = {  1, -1,  1, -1 };
         static const int off_dy[4] = { -1,  1,  1, -1 };
         int pick = rand() & 3;
         aim_x = tx + off_dx[pick];
@@ -1649,7 +1741,6 @@ static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int ac
         if (aim_y >= MAP_H) aim_y = MAP_H - 1;
     }
 
-
     dx = abs(aim_x - x); sx = x < aim_x ? 1 : -1;
     dy = abs(aim_y - y); sy = y < aim_y ? 1 : -1;
     dz = abs(tz - z);    sz = z < tz ? 1 : -1;
@@ -1657,53 +1748,33 @@ static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int ac
     if (dm < 1) dm = 1;
     ex = dm / 2; ey = dm / 2; ez = dm / 2;
 
-    /* Compute gun barrel screen origin & overall projectile screen heading */
+    /* STAGE 1: Trace 3D Bresenham ray to determine exact impact coordinate (hit_bx, hit_by) */
     {
-        int mx0, my0, dest_by;
-        MapCell *aim_cell = &g_map[tz][aim_y][aim_x];
-        isomap_tile_to_screen(u->x, u->y, u->z, &mx0, &my0);
+        int end_sx, end_sy;
         isomap_tile_to_screen(aim_x, aim_y, tz, &end_sx, &end_sy);
-
-        start_bx = mx0 + 16 + barrel_dx[u->dir & 7];
-        start_by = my0 - (u->stance ? 3 : 6) + barrel_dy[u->dir & 7];
-        dest_by  = (aim_cell->unit_idx >= 0 || aim_cell->obj_id != OBJ_NONE) ? (end_sy - 3) : (end_sy + 6);
-        ang_idx  = calc_screen_proj_dir((end_sx + 16) - start_bx, dest_by - start_by);
-
-        /* Weapon-specific Sound Blaster firing audio + custom pixel-art muzzle flash sprite */
-        sound_play_weapon((u->faction == 1) ? 2 : item_legacy_weapon_class(u->weapon_id));
-        isomap_render();
-
-        hud_render();
-        vga_blit_shaded(start_bx - (FX_W / 2), start_by - (FX_H / 2),
-                        FX_W, FX_H, spr_muzzle[proj_type], 0, VIEWPORT_H);
-        vga_flip();
-        game_wait_frames(settings_muzzle_frames());
+        hit_bx = end_sx + 16;
+        hit_by = end_sy + 6;
     }
-
-    prev_bx = start_bx;
-    prev_by = start_by;
 
     for (i = 0; i < dm; i++) {
         int prev_x = x, prev_y = y, prev_z = z;
-        int px1, py1, cur_bx, cur_by;
-        int direct_aim;
+        int px1, py1, direct_aim;
         MapCell *cell;
 
         ex -= dx; if (ex < 0) { ex += dm; x += sx; }
         ey -= dy; if (ey < 0) { ey += dm; y += sy; }
         ez -= dz; if (ez < 0) { ez += dm; z += sz; }
 
+        stop_step = i;
+        hit_x = x; hit_y = y; hit_z = z;
+
         /* 0. Solid indoor ceiling/floor blocks cross-elevation shots (except stairwells) */
         if (z != prev_z && indoor_ceiling_blocks(prev_x, prev_y, prev_z, x, y, z)) {
             int cz = (z > prev_z) ? z : prev_z;
             isomap_tile_to_screen(x, y, cz, &px1, &py1);
-            cur_bx = px1 + 16;
-            cur_by = py1 + 8;
-            animate_proj_segment(proj_type, ang_idx, prev_bx, prev_by, cur_bx, cur_by, bolt_frames);
-            set_status("SHOT HIT CEILING!");
-            wait_min_shot_frames(i);
-            sfx_hit();
-            play_impact_splash(surf_splash, cur_bx, cur_by);
+            hit_bx = px1 + 16;
+            hit_by = py1 + 8;
+            stop_kind = 1;
             break;
         }
 
@@ -1713,9 +1784,20 @@ static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int ac
         if (x != prev_x) {
             int wx = (x > prev_x) ? x : prev_x;
             int wy = (x > prev_x) ? y : prev_y;
-            if (resolve_shot_wall_edge(wx, wy, z, 0, direct_aim, stray_shot,
-                                       proj_type, ang_idx, bolt_frames,
-                                       wall_dmg, surf_splash, i, &prev_bx, &prev_by)) {
+            int wres = trace_shot_wall_edge(wx, wy, z, 0, direct_aim, stray_shot);
+            if (wres == 2 && num_glass_hits < (MAP_W + MAP_H)) {
+                glass_hits[num_glass_hits].step_i   = i;
+                glass_hits[num_glass_hits].z        = z;
+                glass_hits[num_glass_hits].wy       = wy;
+                glass_hits[num_glass_hits].wx       = wx;
+                glass_hits[num_glass_hits].is_north = 0;
+                num_glass_hits++;
+            } else if (wres == 1) {
+                isomap_tile_to_screen(wx, wy, z, &px1, &py1);
+                hit_bx = px1 + 8;
+                hit_by = py1 - 6;
+                hit_wall_x = wx; hit_wall_y = wy; hit_wall_z = z; hit_wall_north = 0;
+                stop_kind = 2;
                 break;
             }
         }
@@ -1724,136 +1806,230 @@ static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int ac
         if (y != prev_y) {
             int wx = (y > prev_y) ? x : prev_x;
             int wy = (y > prev_y) ? y : prev_y;
-            if (resolve_shot_wall_edge(wx, wy, z, 1, direct_aim, stray_shot,
-                                       proj_type, ang_idx, bolt_frames,
-                                       wall_dmg, surf_splash, i, &prev_bx, &prev_by)) {
+            int wres = trace_shot_wall_edge(wx, wy, z, 1, direct_aim, stray_shot);
+            if (wres == 2 && num_glass_hits < (MAP_W + MAP_H)) {
+                glass_hits[num_glass_hits].step_i   = i;
+                glass_hits[num_glass_hits].z        = z;
+                glass_hits[num_glass_hits].wy       = wy;
+                glass_hits[num_glass_hits].wx       = wx;
+                glass_hits[num_glass_hits].is_north = 1;
+                num_glass_hits++;
+            } else if (wres == 1) {
+                isomap_tile_to_screen(wx, wy, z, &px1, &py1);
+                hit_bx = px1 + 24;
+                hit_by = py1 - 6;
+                hit_wall_x = wx; hit_wall_y = wy; hit_wall_z = z; hit_wall_north = 1;
+                stop_kind = 2;
                 break;
             }
         }
 
         cell = &g_map[z][y][x];
         isomap_tile_to_screen(x, y, z, &px1, &py1);
-        cur_bx = px1 + 16;
-        if (cell->unit_idx >= 0 && cell->unit_idx != shooter_idx && g_units[cell->unit_idx].active) {
-            cur_by = py1 - 4;
-        } else if (cell->obj_id != OBJ_NONE) {
-            cur_by = py1 - 2;
-        } else if (i == dm - 1) {
-            cur_by = py1 + 6;
-        } else {
-            cur_by = py1 - 2;
-        }
-
-        /* Fly weapon-specific projectile sprite smoothly across this tile segment */
-        animate_proj_segment(proj_type, ang_idx, prev_bx, prev_by, cur_bx, cur_by, bolt_frames);
-        prev_bx = cur_bx;
-        prev_by = cur_by;
 
         /* 3. Check living unit impact at (x, y, z) (if stray_shot, whizzes past intended target tile!) */
         if (cell->unit_idx >= 0 && cell->unit_idx != shooter_idx && g_units[cell->unit_idx].active &&
             !(stray_shot && x == tx && y == ty && z == tz)) {
-
-            int hit_idx = cell->unit_idx;
-            Unit *target = &g_units[hit_idx];
-            int dmg = (proj_type == PROJ_PLASMA) ? (26 + (rand() % 18)) :
-                      (proj_type == PROJ_LASER)  ? (22 + (rand() % 15)) :
-                                                   (16 + (rand() % 13));
-            int unit_splash = (proj_type == PROJ_BULLET)
-                              ? (target->faction == 1 ? SPLASH_HIT_ALIEN : SPLASH_HIT_HUMAN)
-                              : surf_splash;
-            target->hp -= dmg;
-            if (u->faction == 0 && target->faction == 1) {
-                u->xp_gained += XP_COMBAT_HIT;
-            }
-            wait_min_shot_frames(i);
-            set_status(target->faction == 1
-                       ? (u->faction == 0 ? "DIRECT HIT ON ALIEN! (+10 XP)" : "DIRECT HIT ON ALIEN!")
-                       : "OPERATIVE WOUNDED!");
-            sfx_hit();
-            play_impact_splash(unit_splash, cur_bx, cur_by);
-            if (target->hp <= 0) {
-                kill_unit(hit_idx, shooter_idx);
-            }
+            hit_bx = px1 + 16;
+            hit_by = py1 - 4;
+            hit_unit_idx = cell->unit_idx;
+            stop_kind = 3;
             break;
         }
 
         /* 4. Check volatile fuel barrel impact */
         if (cell->obj_id == OBJ_BARREL) {
-            cell->obj_id = OBJ_RUBBLE;
-            wait_min_shot_frames(i);
-            sfx_hit();
-            play_impact_splash(surf_splash, cur_bx, cur_by);
-            detonate_explosion(x, y, z, shooter_idx);
-            set_status("FUEL BARREL DETONATED!");
+            hit_bx = px1 + 16;
+            hit_by = py1 - 2;
+            stop_kind = 4;
             break;
         }
 
-        /* 4b. Check intact UFO Power Core impact (escalating chance of Mini-Nuke meltdown!) */
+        /* 4b. Check intact UFO Power Core impact */
         if (cell->obj_id == OBJ_UFO_CORE &&
             (i == dm - 1 || (x == aim_x && y == aim_y && z == tz) || (stray_shot && (rand() & 1)))) {
-            g_battle.ufo_core_hits++;
-            wait_min_shot_frames(i);
-            sfx_hit();
-            play_impact_splash(SPLASH_PLASMA, cur_bx, cur_by);
-            if (g_battle.ufo_core_hits >= 2 && (rand() % 100) < (g_battle.ufo_core_hits * 35)) {
-                cell->obj_id = OBJ_RUBBLE;
-                detonate_core_mininuke(x, y, z, shooter_idx);
-            } else {
-                if (cell->smoke < 2) cell->smoke = 2;
-                set_status("WARNING: UFO POWER CORE DESTABILIZING!");
-            }
+            hit_bx = px1 + 16;
+            hit_by = py1 - 2;
+            stop_kind = 5;
             break;
         }
-
 
         /* 5. Check blocking prop impact or end-of-trajectory ground/object impact */
         if (i == dm - 1 || (x == aim_x && y == aim_y && z == tz) ||
             is_los_blocking_prop(cell->obj_id)) {
-            if (cell->obj_id != OBJ_NONE) {
-                int hit_splash = surf_splash;
-                if (isomap_is_ufo_corner_obj(cell->obj_id)) {
-                    set_status("SHOT DEFLECTED OFF UFO HULL!");
-                } else if (!isomap_is_lift_obj(cell->obj_id) && cell->obj_id != OBJ_UFO_CORE &&
-                           cell->obj_id != OBJ_RUBBLE        && cell->obj_id != OBJ_FLARE) {
-                    uint8_t old_obj = cell->obj_id;
-                    int was_veh = isomap_is_vehicle_obj(old_obj);
-                    uint8_t psmoke = (uint8_t)((was_veh ? 2 : 1) + (rand() % 3));
-                    isomap_clear_prop_at(z, y, x, OBJ_RUBBLE, psmoke);
-                    if (old_obj == OBJ_UFO_NAV) {
-                        set_status("UFO NAV CONSOLE DESTROYED!");
-                    } else if (old_obj == OBJ_UFO_COMPUTER) {
-                        set_status("UFO FLIGHT COMPUTER DESTROYED!");
-                    } else if (old_obj == OBJ_UFO_CRYO) {
-                        set_status("ALIEN CRYO-POD SHATTERED!");
-                        hit_splash = SPLASH_GLASS;
-                    } else if (old_obj == OBJ_UFO_POD) {
-                        set_status("ALIEN TECH POD DESTROYED!");
-                    } else {
-                        set_status(was_veh ? "VEHICLE WRECKED!" : "COVER DESTROYED!");
-                    }
-                } else {
-                    set_status("SHOT HIT OBSTACLE!");
-                }
-                wait_min_shot_frames(i);
-                if (hit_splash == SPLASH_GLASS) sfx_glass();
-                else                            sfx_hit();
-                play_impact_splash(hit_splash, cur_bx, cur_by);
-            } else {
-                /* Open ground impact (or drop to ground below if shot into upper-level air) */
-                int gz = z;
-                while (gz > 0 && g_map[gz][y][x].floor_id == FLOOR_NONE) gz--;
-                if (gz != z) {
-                    int gsx, gsy;
-                    isomap_tile_to_screen(x, y, gz, &gsx, &gsy);
-                    cur_bx = gsx + 16;
-                    cur_by = gsy + 6;
-                }
-                set_status((aim_x != tx || aim_y != ty) ? "SHOT MISSED!" : "SHOT HIT GROUND!");
-                wait_min_shot_frames(i);
-                sfx_hit();
-                play_impact_splash(surf_splash, cur_bx, cur_by);
-            }
+            hit_bx = px1 + 16;
+            hit_by = (cell->obj_id != OBJ_NONE) ? (py1 - 2) : (py1 + 6);
+            stop_kind = 6;
             break;
+        }
+    }
+
+    /* STAGE 2: Compute gun barrel screen origin & fly projectile in a single straight line to (hit_bx, hit_by) */
+    {
+        int mx0, my0, start_wx, start_wy, hit_wx, hit_wy, prev_wx, prev_wy;
+        int shooter_vis = (u->faction == 0 || g_map[u->z][u->y][u->x].fog == FOG_VISIBLE);
+        isomap_tile_to_screen(u->x, u->y, u->z, &mx0, &my0);
+        start_bx = mx0 + 16 + barrel_dx[u->dir & 7];
+        start_by = my0 - (u->stance ? 3 : 6) + barrel_dy[u->dir & 7];
+        ang_idx  = calc_screen_proj_dir(hit_bx - start_bx, hit_by - start_by);
+
+        start_wx = start_bx - g_battle.cam_x;
+        start_wy = start_by - g_battle.cam_y;
+        hit_wx   = hit_bx   - g_battle.cam_x;
+        hit_wy   = hit_by   - g_battle.cam_y;
+
+        track_camera_for_projectile(start_wx, start_wy, hit_wx - start_wx, hit_wy - start_wy, shooter_vis);
+        start_bx = g_battle.cam_x + start_wx;
+        start_by = g_battle.cam_y + start_wy;
+
+        /* Weapon-specific Sound Blaster firing audio + custom pixel-art muzzle flash sprite */
+        sound_play_weapon((u->faction == 1) ? 2 : item_legacy_weapon_class(u->weapon_id));
+        isomap_render();
+        hud_render();
+        vga_blit_shaded(start_bx - (FX_W / 2), start_by - (FX_H / 2),
+                        FX_W, FX_H, spr_muzzle[proj_type], 0, VIEWPORT_H);
+        vga_flip();
+        game_wait_frames(settings_muzzle_frames());
+
+        total_steps = stop_step + 1;
+        if (total_steps < 1) total_steps = 1;
+        prev_wx   = start_wx;
+        prev_wy   = start_wy;
+        prev_step = 0;
+
+        for (g = 0; g < num_glass_hits; g++) {
+            int g_step   = glass_hits[g].step_i + 1;
+            int g_wx     = start_wx + ((hit_wx - start_wx) * g_step) / total_steps;
+            int g_wy     = start_wy + ((hit_wy - start_wy) * g_step) / total_steps;
+            int g_frames = (g_step - prev_step) * bolt_frames;
+            int glass_shat = 0;
+            if (g_frames > 0) {
+                animate_proj_segment(proj_type, ang_idx,
+                                     g_battle.cam_x + prev_wx, g_battle.cam_y + prev_wy,
+                                     g_battle.cam_x + g_wx,    g_battle.cam_y + g_wy,
+                                     g_frames);
+            }
+            damage_wall_edge(glass_hits[g].z, glass_hits[g].wy, glass_hits[g].wx,
+                             glass_hits[g].is_north, 15, 0, &glass_shat);
+            sfx_glass();
+            play_impact_splash(SPLASH_GLASS, g_battle.cam_x + g_wx, g_battle.cam_y + g_wy);
+            prev_wx   = g_wx;
+            prev_wy   = g_wy;
+            prev_step = g_step;
+        }
+
+        rem_frames = (total_steps - prev_step) * bolt_frames;
+        if (rem_frames < 1) rem_frames = 1;
+        animate_proj_segment(proj_type, ang_idx,
+                             g_battle.cam_x + prev_wx, g_battle.cam_y + prev_wy,
+                             g_battle.cam_x + hit_wx,  g_battle.cam_y + hit_wy,
+                             rem_frames);
+
+        hit_bx = g_battle.cam_x + hit_wx;
+        hit_by = g_battle.cam_y + hit_wy;
+    }
+
+    /* STAGE 3: Apply terminal impact damage, audio & splash at (hit_bx, hit_by) */
+    if (stop_kind == 1) {
+        set_status("SHOT HIT CEILING!");
+        wait_min_shot_frames(stop_step);
+        sfx_hit();
+        play_impact_splash(surf_splash, hit_bx, hit_by);
+    } else if (stop_kind == 2) {
+        uint8_t w = hit_wall_north ? g_map[hit_wall_z][hit_wall_y][hit_wall_x].wall_north
+                                   : g_map[hit_wall_z][hit_wall_y][hit_wall_x].wall_west;
+        int is_intact_glass = (w == WALL_BRICK_WIN || w == WALL_DINER_GLASS);
+        int glass_shat = 0;
+        damage_wall_edge(hit_wall_z, hit_wall_y, hit_wall_x, hit_wall_north, wall_dmg, 0, &glass_shat);
+        wait_min_shot_frames(stop_step);
+        if (is_intact_glass || glass_shat) {
+            sfx_glass();
+            play_impact_splash(SPLASH_GLASS, hit_bx, hit_by);
+        } else {
+            sfx_hit();
+            play_impact_splash(surf_splash, hit_bx, hit_by);
+        }
+    } else if (stop_kind == 3 && hit_unit_idx >= 0) {
+        Unit *target = &g_units[hit_unit_idx];
+        int dmg = (proj_type == PROJ_PLASMA) ? (26 + (rand() % 18)) :
+                  (proj_type == PROJ_LASER)  ? (22 + (rand() % 15)) :
+                                               (16 + (rand() % 13));
+        int unit_splash = (proj_type == PROJ_BULLET)
+                          ? (target->faction == 1 ? SPLASH_HIT_ALIEN : SPLASH_HIT_HUMAN)
+                          : surf_splash;
+        target->hp -= dmg;
+        if (u->faction == 0 && target->faction == 1) {
+            u->xp_gained += XP_COMBAT_HIT;
+        }
+        wait_min_shot_frames(stop_step);
+        if (target->faction == FACTION_ALIEN) {
+            set_status(u->faction == FACTION_DUFFCOM ? "DIRECT HIT ON ALIEN! (+10 XP)" : "DIRECT HIT ON ALIEN!");
+        } else if (target->faction == FACTION_CIVILIAN) {
+            set_status(u->faction == FACTION_DUFFCOM ? "FRIENDLY FIRE! CIVILIAN HIT!" : "ALIEN SHOT CIVILIAN!");
+        } else {
+            set_status("OPERATIVE WOUNDED!");
+        }
+        sfx_hit();
+        play_impact_splash(unit_splash, hit_bx, hit_by);
+        if (target->hp <= 0) {
+            kill_unit(hit_unit_idx, shooter_idx);
+        }
+    } else if (stop_kind == 4) {
+        g_map[hit_z][hit_y][hit_x].obj_id = OBJ_RUBBLE;
+        wait_min_shot_frames(stop_step);
+        sfx_hit();
+        play_impact_splash(surf_splash, hit_bx, hit_by);
+        detonate_explosion(hit_x, hit_y, hit_z, shooter_idx);
+        set_status("FUEL BARREL DETONATED!");
+    } else if (stop_kind == 5) {
+        MapCell *cell = &g_map[hit_z][hit_y][hit_x];
+        g_battle.ufo_core_hits++;
+        wait_min_shot_frames(stop_step);
+        sfx_hit();
+        play_impact_splash(SPLASH_PLASMA, hit_bx, hit_by);
+        if (g_battle.ufo_core_hits >= 2 && (rand() % 100) < (g_battle.ufo_core_hits * 35)) {
+            cell->obj_id = OBJ_RUBBLE;
+            detonate_core_mininuke(hit_x, hit_y, hit_z, shooter_idx);
+        } else {
+            if (cell->smoke < 2) cell->smoke = 2;
+            set_status("WARNING: UFO POWER CORE DESTABILIZING!");
+        }
+    } else {
+        MapCell *cell = &g_map[hit_z][hit_y][hit_x];
+        if (cell->obj_id != OBJ_NONE) {
+            int hit_splash = surf_splash;
+            if (isomap_is_ufo_corner_obj(cell->obj_id)) {
+                set_status("SHOT DEFLECTED OFF UFO HULL!");
+            } else if (!isomap_is_lift_obj(cell->obj_id) && cell->obj_id != OBJ_UFO_CORE &&
+                       cell->obj_id != OBJ_RUBBLE        && cell->obj_id != OBJ_FLARE) {
+                uint8_t old_obj = cell->obj_id;
+                int was_veh = isomap_is_vehicle_obj(old_obj);
+                uint8_t psmoke = (uint8_t)((was_veh ? 2 : 1) + (rand() % 3));
+                isomap_clear_prop_at(hit_z, hit_y, hit_x, OBJ_RUBBLE, psmoke);
+                if (old_obj == OBJ_UFO_NAV) {
+                    set_status("UFO NAV CONSOLE DESTROYED!");
+                } else if (old_obj == OBJ_UFO_COMPUTER) {
+                    set_status("UFO FLIGHT COMPUTER DESTROYED!");
+                } else if (old_obj == OBJ_UFO_CRYO) {
+                    set_status("ALIEN CRYO-POD SHATTERED!");
+                    hit_splash = SPLASH_GLASS;
+                } else if (old_obj == OBJ_UFO_POD) {
+                    set_status("ALIEN TECH POD DESTROYED!");
+                } else {
+                    set_status(was_veh ? "VEHICLE WRECKED!" : "COVER DESTROYED!");
+                }
+            } else {
+                set_status("SHOT HIT OBSTACLE!");
+            }
+            wait_min_shot_frames(stop_step);
+            if (hit_splash == SPLASH_GLASS) sfx_glass();
+            else                            sfx_hit();
+            play_impact_splash(hit_splash, hit_bx, hit_by);
+        } else {
+            set_status((aim_x != tx || aim_y != ty) ? "SHOT MISSED!" : "SHOT HIT GROUND!");
+            wait_min_shot_frames(stop_step);
+            sfx_hit();
+            play_impact_splash(surf_splash, hit_bx, hit_by);
         }
     }
     combat_anim_depth--;
@@ -1919,15 +2095,23 @@ void isomap_fire_weapon(int tx, int ty) {
 
         isomap_tile_to_screen(u->x, u->y, u->z, &sx0, &sy0);
         isomap_tile_to_screen(tx, ty, g_battle.view_level, &sx1, &sy1);
-        for (step = 1; step <= 8; step++) {
-            int gx = sx0 + 16 + ((sx1 - sx0) * step) / 8;
-            int gy = sy0 - 4 + ((sy1 + 10 - sy0) * step) / 8 - (16 - (step - 4) * (step - 4));
-            isomap_render();
-            hud_render();
-            vga_blit_shaded(gx - (FX_W / 2), gy - (FX_H / 2),
-                            FX_W, FX_H, spr_thrown[1][step & 3], 0, VIEWPORT_H);
-            vga_flip();
-            game_wait_frames(settings_grenade_step_frames());
+        {
+            int wx0 = sx0 - g_battle.cam_x, wy0 = sy0 - g_battle.cam_y;
+            int wx1 = sx1 - g_battle.cam_x, wy1 = sy1 - g_battle.cam_y;
+            for (step = 1; step <= 8; step++) {
+                int gwx = wx0 + 16 + ((wx1 - wx0) * step) / 8;
+                int gwy = wy0 - 4 + ((wy1 + 10 - wy0) * step) / 8 - (16 - (step - 4) * (step - 4));
+                track_camera_for_projectile(gwx, gwy, wx1 - wx0, wy1 - wy0, step == 1);
+                isomap_render();
+                hud_render();
+                vga_blit_shaded(g_battle.cam_x + gwx - (FX_W / 2),
+                                g_battle.cam_y + gwy - (FX_H / 2),
+                                FX_W, FX_H, spr_thrown[1][step & 3], 0, VIEWPORT_H);
+                vga_flip();
+                game_wait_frames(settings_grenade_step_frames());
+            }
+            sx1 = g_battle.cam_x + wx1;
+            sy1 = g_battle.cam_y + wy1;
         }
         if (g_map[g_battle.view_level][ty][tx].obj_id == OBJ_NONE ||
             g_map[g_battle.view_level][ty][tx].obj_id == OBJ_RUBBLE) {
@@ -1986,15 +2170,22 @@ void isomap_fire_weapon(int tx, int ty) {
         combat_anim_depth++;
         isomap_tile_to_screen(u->x, u->y, u->z, &sx0, &sy0);
         isomap_tile_to_screen(land_x, land_y, g_battle.view_level, &sx1, &sy1);
-        for (step = 1; step <= 8; step++) {
-            int gx = sx0 + 16 + ((sx1 - sx0) * step) / 8;
-            int gy = sy0 - 4 + ((sy1 + 10 - sy0) * step) / 8 - (16 - (step - 4) * (step - 4));
-            isomap_render();
-            hud_render();
-            vga_blit_shaded(gx - 8, gy - 6, GROUND_ITEM_W, GROUND_ITEM_H,
-                            spr_ground_items[thrown_id % ITEM_COUNT], 0, VIEWPORT_H);
-            vga_flip();
-            game_wait_frames(settings_grenade_step_frames());
+        {
+            int wx0 = sx0 - g_battle.cam_x, wy0 = sy0 - g_battle.cam_y;
+            int wx1 = sx1 - g_battle.cam_x, wy1 = sy1 - g_battle.cam_y;
+            for (step = 1; step <= 8; step++) {
+                int gwx = wx0 + 16 + ((wx1 - wx0) * step) / 8;
+                int gwy = wy0 - 4 + ((wy1 + 10 - wy0) * step) / 8 - (16 - (step - 4) * (step - 4));
+                track_camera_for_projectile(gwx, gwy, wx1 - wx0, wy1 - wy0, step == 1);
+                isomap_render();
+                hud_render();
+                vga_blit_shaded(g_battle.cam_x + gwx - 8,
+                                g_battle.cam_y + gwy - 6,
+                                GROUND_ITEM_W, GROUND_ITEM_H,
+                                spr_ground_items[thrown_id % ITEM_COUNT], 0, VIEWPORT_H);
+                vga_flip();
+                game_wait_frames(settings_grenade_step_frames());
+            }
         }
         {
             int tidx = g_map[g_battle.view_level][land_y][land_x].unit_idx;
@@ -2048,15 +2239,21 @@ void isomap_fire_weapon(int tx, int ty) {
         combat_anim_depth++;
         isomap_tile_to_screen(u->x, u->y, u->z, &sx0, &sy0);
         isomap_tile_to_screen(land_x, land_y, g_battle.view_level, &sx1, &sy1);
-        for (step = 1; step <= 10; step++) {
-            int gx = sx0 + 16 + ((sx1 - sx0) * step) / 10;
-            int gy = sy0 - 4 + ((sy1 + 10 - sy0) * step) / 10 - (25 - (step - 5) * (step - 5)) * 3 / 4;
-            isomap_render();
-            hud_render();
-            vga_blit_shaded(gx - (FX_W / 2), gy - (FX_H / 2),
-                            FX_W, FX_H, spr_thrown[0][step & 3], 0, VIEWPORT_H);
-            vga_flip();
-            game_wait_frames(settings_grenade_step_frames());
+        {
+            int wx0 = sx0 - g_battle.cam_x, wy0 = sy0 - g_battle.cam_y;
+            int wx1 = sx1 - g_battle.cam_x, wy1 = sy1 - g_battle.cam_y;
+            for (step = 1; step <= 10; step++) {
+                int gwx = wx0 + 16 + ((wx1 - wx0) * step) / 10;
+                int gwy = wy0 - 4 + ((wy1 + 10 - wy0) * step) / 10 - (25 - (step - 5) * (step - 5)) * 3 / 4;
+                track_camera_for_projectile(gwx, gwy, wx1 - wx0, wy1 - wy0, step == 1);
+                isomap_render();
+                hud_render();
+                vga_blit_shaded(g_battle.cam_x + gwx - (FX_W / 2),
+                                g_battle.cam_y + gwy - (FX_H / 2),
+                                FX_W, FX_H, spr_thrown[0][step & 3], 0, VIEWPORT_H);
+                vga_flip();
+                game_wait_frames(settings_grenade_step_frames());
+            }
         }
         detonate_explosion(land_x, land_y, g_battle.view_level, g_battle.selected_unit);
         isomap_recalc_lighting_and_fov();
@@ -2318,6 +2515,218 @@ void isomap_end_turn(void) {
 
     show_hidden_movement_screen();
     game_wait_frames(settings_hidden_banner_frames());
+
+    /* 1b. Civilian Phase: Coopersburg civilians traverse the map & scream in terror if they spot an alien! */
+    for (i = 0; i < MAX_UNITS && g_battle.mission_ended == 0; i++) {
+        Unit *c = &g_units[i];
+        int seen_alien = -1, seen_dist = 999;
+        int s, step;
+        int screamed_this_turn = 0;
+        PathResult civ_path;
+        int has_path = 0, max_steps = 0;
+
+        if (!c->active || c->faction != FACTION_CIVILIAN) continue;
+        c->tu = c->tu_max;
+
+        /* Check if this civilian spots any active Alien in Line-of-Sight */
+        for (s = 0; s < MAX_UNITS; s++) {
+            if (g_units[s].active && g_units[s].faction == FACTION_ALIEN) {
+                Unit *al = &g_units[s];
+                int d = abs(al->x - c->x) + abs(al->y - c->y);
+                int max_sight = (g_battle.night_mode && g_map[al->z][al->y][al->x].light > 6) ? 10 : 16;
+                if (d <= max_sight && d < seen_dist &&
+                    isomap_has_los(c->x, c->y, c->z, al->x, al->y, al->z)) {
+                    seen_dist  = d;
+                    seen_alien = s;
+                }
+            }
+        }
+
+        if (seen_alien >= 0) {
+            /* Civilian spots an alien and SCREAMS! */
+            Unit *al = &g_units[seen_alien];
+            char sc_msg[48];
+            int best_fx = c->x, best_fy = c->y, best_score = -999, tries;
+
+            c->dir = calc_dir_8(al->x - c->x, al->y - c->y);
+            snprintf(sc_msg, sizeof(sc_msg), "%s SCREAMS! ALIEN SPOTTED!", c->name);
+            set_status(sc_msg);
+            sound_play_civ_scream(c->gender);
+            screamed_this_turn = 1;
+
+            if (g_map[c->z][c->y][c->x].fog == FOG_VISIBLE) {
+                if (hidden_screen_up) {
+                    hidden_screen_up = 0;
+                    need_hidden_pause = 0;
+                }
+                g_battle.view_level = c->z;
+                isomap_center_camera_on(c->x, c->y, c->z);
+                isomap_render();
+                hud_render();
+                vga_flip();
+                game_wait_frames(settings_alien_post_shot_frames() / 2);
+            } else {
+                /* Audible scream in the fog of war! Show alert subtitle on Hidden Movement screen */
+                isomap_draw_hidden_screen();
+                vga_rect_bevel(36, 132, 248, 20, 45, 96, 15);
+                vga_print_shadow((SCREEN_W - vga_text_width(sc_msg)) / 2, 138, sc_msg, 96, 15);
+                vga_flip();
+                game_wait_frames(settings_alien_post_shot_frames());
+            }
+
+            /* Flee away from the alien! */
+            for (tries = 0; tries < 24; tries++) {
+                int fx = c->x + (rand() % 11) - 5;
+                int fy = c->y + (rand() % 11) - 5;
+                int fz = c->z;
+                int d_al;
+                if (fx < 1 || fx >= MAP_W - 1 || fy < 1 || fy >= MAP_H - 1) continue;
+                if (fx == c->x && fy == c->y) continue;
+                if (g_map[fz][fy][fx].floor_id == FLOOR_NONE) continue;
+                if (g_map[fz][fy][fx].unit_idx != -1) continue;
+                if (g_map[fz][fy][fx].obj_id != OBJ_NONE &&
+                    g_map[fz][fy][fx].obj_id != OBJ_RUBBLE) continue;
+                d_al = abs(fx - al->x) + abs(fy - al->y);
+                if (d_al > best_score) {
+                    best_score = d_al;
+                    best_fx = fx;
+                    best_fy = fy;
+                }
+            }
+            if (best_fx != c->x || best_fy != c->y) {
+                has_path = pathfind_compute(c->x, c->y, c->z, best_fx, best_fy, c->z, 0, &civ_path);
+                max_steps = 3;
+            }
+        } else if ((rand() % 100) < 75) {
+            /* Unalerted civilian wanders locally around Coopersburg */
+            int tries;
+            for (tries = 0; tries < 10 && !has_path; tries++) {
+                int wx = c->x + (rand() % 9) - 4;
+                int wy = c->y + (rand() % 9) - 4;
+                int wz = c->z;
+                if (wx < 1 || wx >= MAP_W - 1 || wy < 1 || wy >= MAP_H - 1) continue;
+                if (wx == c->x && wy == c->y) continue;
+                if (g_map[wz][wy][wx].floor_id == FLOOR_NONE) continue;
+                if (g_map[wz][wy][wx].unit_idx != -1) continue;
+                if (g_map[wz][wy][wx].obj_id != OBJ_NONE &&
+                    g_map[wz][wy][wx].obj_id != OBJ_RUBBLE) continue;
+                has_path = pathfind_compute(c->x, c->y, c->z, wx, wy, wz, 0, &civ_path);
+            }
+            max_steps = 2;
+        }
+
+        for (step = 0; has_path && step < max_steps && step < civ_path.length &&
+                       c->active && c->tu >= 8 && g_battle.mission_ended == 0; step++) {
+            PathStep *st = &civ_path.steps[step];
+            int prev_cx = c->x, prev_cy = c->y, prev_cz = c->z;
+            int was_vis = (g_map[prev_cz][prev_cy][prev_cx].fog == FOG_VISIBLE);
+            int now_vis, door_opened;
+
+            if (g_map[st->z][st->y][st->x].unit_idx != -1) break;
+            door_opened = auto_open_doors_between(c->x, c->y, c->z, st->x, st->y);
+            if (door_opened) {
+                isomap_recalc_lighting_and_fov();
+                was_vis = (g_map[prev_cz][prev_cy][prev_cx].fog == FOG_VISIBLE);
+            }
+            now_vis = (g_map[st->z][st->y][st->x].fog == FOG_VISIBLE);
+
+            if (was_vis || now_vis) {
+                int sx0, sy0, sx1, sy1, csx, csy, f;
+                int astep_frames = settings_alien_step_frames();
+                int half_step    = (astep_frames >= 4) ? (astep_frames / 2) : 2;
+                int cam_tx       = now_vis ? st->x : prev_cx;
+                int cam_ty       = now_vis ? st->y : prev_cy;
+                int cam_tz       = now_vis ? st->z : prev_cz;
+                int was_hidden   = hidden_screen_up;
+
+                if (hidden_screen_up) {
+                    hidden_screen_up  = 0;
+                    need_hidden_pause = 0;
+                }
+                if (prev_cx != st->x || prev_cy != st->y) {
+                    c->dir = calc_dir_8(st->x - prev_cx, st->y - prev_cy);
+                }
+                c->tu -= st->tu_cost;
+
+                isomap_tile_to_screen(cam_tx, cam_ty, cam_tz, &csx, &csy);
+                if (was_hidden || g_battle.view_level != cam_tz ||
+                    csx < 36 || csx > SCREEN_W - 68 || csy < 28 || csy > VIEWPORT_H - 28) {
+                    g_battle.view_level = cam_tz;
+                    isomap_center_camera_on(cam_tx, cam_ty, cam_tz);
+                }
+                isomap_tile_to_screen(prev_cx, prev_cy, prev_cz, &sx0, &sy0);
+                isomap_tile_to_screen(st->x,   st->y,   st->z,   &sx1, &sy1);
+
+                if (!screamed_this_turn) {
+                    set_status("CIVILIAN MOVING IN SECTOR");
+                }
+                if (door_opened) sfx_door();
+                else             sfx_step();
+
+                g_map[prev_cz][prev_cy][prev_cx].unit_idx = -1;
+                c->x = st->x;
+                c->y = st->y;
+                c->z = st->z;
+                g_map[c->z][c->y][c->x].unit_idx = (int8_t)i;
+
+                for (f = 1; f <= astep_frames; f++) {
+                    c->anim_pose   = ((f / half_step) & 1) ? 2 : 3;
+                    c->pixel_off_x = ((sx0 - sx1) * (astep_frames - f)) / astep_frames;
+                    c->pixel_off_y = ((sy0 - sy1) * (astep_frames - f)) / astep_frames;
+                    isomap_render();
+                    hud_render();
+                    vga_vsync();
+                    music_tick();
+                    vga_flip();
+                }
+                c->anim_pose   = 0;
+                c->pixel_off_x = 0;
+                c->pixel_off_y = 0;
+            } else {
+                g_map[prev_cz][prev_cy][prev_cx].unit_idx = -1;
+                c->x = st->x;
+                c->y = st->y;
+                c->z = st->z;
+                c->tu -= st->tu_cost;
+                if (c->x != prev_cx || c->y != prev_cy) {
+                    c->dir = calc_dir_8(c->x - prev_cx, c->y - prev_cy);
+                }
+                g_map[c->z][c->y][c->x].unit_idx = (int8_t)i;
+            }
+
+            /* If the civilian did not see an alien before walking, check if they just walked into LOS of one! */
+            if (!screamed_this_turn && c->active) {
+                for (s = 0; s < MAX_UNITS; s++) {
+                    if (g_units[s].active && g_units[s].faction == FACTION_ALIEN) {
+                        Unit *al = &g_units[s];
+                        int d = abs(al->x - c->x) + abs(al->y - c->y);
+                        if (d <= 15 && isomap_has_los(c->x, c->y, c->z, al->x, al->y, al->z)) {
+                            char sc_msg[48];
+                            snprintf(sc_msg, sizeof(sc_msg), "%s SCREAMS! ALIEN SPOTTED!", c->name);
+                            set_status(sc_msg);
+                            sound_play_civ_scream(c->gender);
+                            screamed_this_turn = 1;
+                            if (hidden_screen_up) {
+                                isomap_draw_hidden_screen();
+                                vga_rect_bevel(36, 132, 248, 20, 45, 96, 15);
+                                vga_print_shadow((SCREEN_W - vga_text_width(sc_msg)) / 2, 138, sc_msg, 96, 15);
+                                vga_flip();
+                            }
+                            game_wait_frames(settings_alien_post_shot_frames() / 2);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!hidden_screen_up && g_battle.mission_ended == 0) {
+            game_wait_frames(settings_alien_post_shot_frames() / 2);
+            show_hidden_movement_screen();
+            hidden_screen_up  = 1;
+            need_hidden_pause = 1;
+        }
+    }
 
     /* 2. Tactical Alien AI: Guard/Patrol until alerted, then hunt & fire Plasma if in LOS */
     for (i = 0; i < MAX_UNITS && g_battle.mission_ended == 0; i++) {
@@ -2646,11 +3055,11 @@ void isomap_end_turn(void) {
         }
 
 
-        /* If alien still alive and has Line-of-Sight to any DUFF-COM operative in sight range, fire Plasma! */
+        /* If alien still alive and has Line-of-Sight to any DUFF-COM operative (or Civilian) in sight range, fire Plasma! */
         if (a->active && a->tu >= 15) {
             int shot_s = -1, shot_dist = 999;
             for (s = 0; s < MAX_UNITS; s++) {
-                if (g_units[s].active && g_units[s].faction == 0) {
+                if (g_units[s].active && g_units[s].faction == FACTION_DUFFCOM) {
                     Unit *op = &g_units[s];
                     int d = abs(op->x - a->x) + abs(op->y - a->y);
                     int max_ai_sight = (g_battle.night_mode && g_map[op->z][op->y][op->x].light > 6) ? 11 : 19;
@@ -2658,6 +3067,21 @@ void isomap_end_turn(void) {
                         isomap_has_los(a->x, a->y, a->z, op->x, op->y, op->z)) {
                         shot_dist = d;
                         shot_s = s;
+                    }
+                }
+            }
+            /* If no DUFF-COM operative is in LOS, aliens may terrorize & shoot a visible Civilian! */
+            if (shot_s < 0) {
+                for (s = 0; s < MAX_UNITS; s++) {
+                    if (g_units[s].active && g_units[s].faction == FACTION_CIVILIAN) {
+                        Unit *civ = &g_units[s];
+                        int d = abs(civ->x - a->x) + abs(civ->y - a->y);
+                        int max_ai_sight = (g_battle.night_mode && g_map[civ->z][civ->y][civ->x].light > 6) ? 10 : 16;
+                        if (d <= max_ai_sight && d < shot_dist &&
+                            isomap_has_los(a->x, a->y, a->z, civ->x, civ->y, civ->z)) {
+                            shot_dist = d;
+                            shot_s = s;
+                        }
                     }
                 }
             }
@@ -3241,6 +3665,9 @@ void isomap_render(void) {
     int8_t unit_draw_x[MAX_UNITS];
     int8_t unit_draw_y[MAX_UNITS];
     int8_t unit_draw_z[MAX_UNITS];
+    int8_t unit_shad_z[MAX_UNITS];
+    int8_t unit_shad_off_x[MAX_UNITS];
+    int8_t unit_shad_off_y[MAX_UNITS];
 
     clamp_camera();
     cmode = isomap_get_cursor_mode();
@@ -3249,23 +3676,27 @@ void isomap_render(void) {
         g_battle.anim_tick++;
     }
 
-    /* Precompute instantaneous foot-center tile (draw_x, draw_y, draw_z) for every visible unit
-     * so sub-tile walking smoothly crosses wall/door/prop boundaries at the exact 50% midpoint! */
+    /* Precompute instantaneous foot-center tile (draw_x, draw_y, draw_z) and floor shadow level
+     * (shad_z) for every visible unit so shadows render on the floor below hovering Floaters! */
     for (u_idx = 0; u_idx < MAX_UNITS; u_idx++) {
         Unit *u = &g_units[u_idx];
         unit_draw_x[u_idx] = -1;
         unit_draw_y[u_idx] = -1;
         unit_draw_z[u_idx] = -1;
+        unit_shad_z[u_idx] = -1;
+        unit_shad_off_x[u_idx] = 0;
+        unit_shad_off_y[u_idx] = 0;
         if (!u->active) continue;
         if (u->faction != 0 && g_map[u->z][u->y][u->x].fog != FOG_VISIBLE) continue;
 
         {
-            int dx = u->x, dy = u->y, dz = u->z;
+            int dx = u->x, dy = u->y, dz = u->z, sz;
             int changing_z = (g_battle.walking_active &&
                               u_idx == g_battle.selected_unit &&
                               g_battle.walk_step_idx < g_walk_path.length &&
                               g_walk_path.steps[g_battle.walk_step_idx].z != u->z);
-            if (!changing_z && (u->pixel_off_x != 0 || u->pixel_off_y != 0) &&
+            int is_vert_step = changing_z || (u->pixel_off_x == 0 && u->pixel_off_y != 0);
+            if (!is_vert_step && (u->pixel_off_x != 0 || u->pixel_off_y != 0) &&
                 abs(u->pixel_off_y) <= TILE_H) {
                 int usx, usy;
                 isomap_tile_to_screen(u->x, u->y, u->z, &usx, &usy);
@@ -3277,9 +3708,20 @@ void isomap_render(void) {
                     dy = u->y;
                 }
             }
+            sz = dz;
+            while (sz > 0 &&
+                   (g_map[sz][dy][dx].floor_id == FLOOR_NONE ||
+                    isomap_is_lift_obj(g_map[sz - 1][dy][dx].obj_id))) {
+                sz--;
+            }
             unit_draw_x[u_idx] = (int8_t)dx;
             unit_draw_y[u_idx] = (int8_t)dy;
             unit_draw_z[u_idx] = (int8_t)dz;
+            unit_shad_z[u_idx] = (int8_t)sz;
+            if (!is_vert_step) {
+                unit_shad_off_x[u_idx] = (int8_t)u->pixel_off_x;
+                unit_shad_off_y[u_idx] = (int8_t)u->pixel_off_y;
+            }
         }
     }
 
@@ -3329,22 +3771,30 @@ void isomap_render(void) {
                                   g_map[z][y][x - 1].fog != FOG_UNSEEN);
                     int show_n = (cell->wall_north != WALL_NONE && y > 0 &&
                                   g_map[z][y - 1][x].fog != FOG_UNSEEN);
-                    if (!show_w && !show_n) continue;
-                    isomap_tile_to_screen(x, y, z, &sx, &sy);
-                    if (sx < -48 || sx >= SCREEN_W + 24 || sy < -40 || sy >= VIEWPORT_H + 40) continue;
-                    if (show_w) {
-                        MapCell *wc = &g_map[z][y][x - 1];
-                        int wshade = wc->light + (wc->fog == FOG_SEEN ? 4 : 0);
-                        if (wshade > 14) wshade = 14;
-                        vga_blit_shaded(sx, sy - LEVEL_H, WALL_W, WALL_H,
-                                        spr_walls_west[cell->wall_west], wshade, VIEWPORT_H);
+                    if (show_w || show_n) {
+                        isomap_tile_to_screen(x, y, z, &sx, &sy);
+                        if (sx >= -48 && sx < SCREEN_W + 24 && sy >= -40 && sy < VIEWPORT_H + 40) {
+                            if (show_w) {
+                                MapCell *wc = &g_map[z][y][x - 1];
+                                int wshade = wc->light + (wc->fog == FOG_SEEN ? 4 : 0);
+                                if (wshade > 14) wshade = 14;
+                                vga_blit_shaded(sx, sy - LEVEL_H, WALL_W, WALL_H,
+                                                spr_walls_west[cell->wall_west], wshade, VIEWPORT_H);
+                            }
+                            if (show_n) {
+                                MapCell *nc = &g_map[z][y - 1][x];
+                                int nshade = nc->light + (nc->fog == FOG_SEEN ? 4 : 0);
+                                if (nshade > 14) nshade = 14;
+                                vga_blit_shaded(sx + 16, sy - LEVEL_H, WALL_W, WALL_H,
+                                                spr_walls_north[cell->wall_north], nshade, VIEWPORT_H);
+                            }
+                        }
                     }
-                    if (show_n) {
-                        MapCell *nc = &g_map[z][y - 1][x];
-                        int nshade = nc->light + (nc->fog == FOG_SEEN ? 4 : 0);
-                        if (nshade > 14) nshade = 14;
-                        vga_blit_shaded(sx + 16, sy - LEVEL_H, WALL_W, WALL_H,
-                                        spr_walls_north[cell->wall_north], nshade, VIEWPORT_H);
+                    if (combat_anim_depth == 0 && g_input.my < HUD_Y &&
+                        !g_battle.weapon_menu_open && !g_settings.menu_open &&
+                        z == g_battle.view_level && x == g_battle.cur_x && y == g_battle.cur_y) {
+                        uint8_t box_col = (cmode != CURSOR_ARROW) ? 32 : 96;
+                        draw_3d_cursor_box(x, y, z, box_col);
                     }
                     continue;
                 }
@@ -3400,6 +3850,23 @@ void isomap_render(void) {
                     }
                 }
 
+
+                /* 3a2. Standalone Unit Ground Shadows cast onto floor (x, y, z) from units at or above z */
+                if (cell->floor_id != FLOOR_NONE) {
+                    for (u_idx = 0; u_idx < MAX_UNITS; u_idx++) {
+                        if (unit_shad_z[u_idx] == z &&
+                            unit_draw_y[u_idx] == y &&
+                            unit_draw_x[u_idx] == x) {
+                            Unit *su = &g_units[u_idx];
+                            int shad_sx, shad_sy;
+                            if (su->death_anim >= 4) continue;
+                            isomap_tile_to_screen(su->x, su->y, z, &shad_sx, &shad_sy);
+                            vga_blit_shaded(shad_sx + 4 + unit_shad_off_x[u_idx],
+                                            shad_sy - 18 + unit_shad_off_y[u_idx],
+                                            UNIT_W, UNIT_H, spr_unit_shadow, shade, VIEWPORT_H);
+                        }
+                    }
+                }
 
                 /* 3b. Active Fire & Back-Half Billowing Smoke Clouds */
                 if (cell->fire > 0) {
@@ -3461,20 +3928,59 @@ void isomap_render(void) {
                                     vga_line_clip(ux + 12, uy - 6, ux + 9,  uy - 9, 96, VIEWPORT_H);
                                     vga_line_clip(ux + 12, uy - 6, ux + 15, uy - 9, 96, VIEWPORT_H);
                                     vga_line_clip(ux + 9,  uy - 9, ux + 15, uy - 9, 96, VIEWPORT_H);
-                                } else if (u->faction == 1 && uy - 4 >= 0 && uy - 2 <= VIEWPORT_H) {
+                                } else if (u->faction == FACTION_ALIEN && uy - 4 >= 0 && uy - 2 <= VIEWPORT_H) {
                                     vga_rect_fill(ux + 10, uy - 4, 4, 2, 32);
+                                } else if (u->faction == FACTION_CIVILIAN && uy - 4 >= 0 && uy - 2 <= VIEWPORT_H) {
+                                    vga_rect_fill(ux + 10, uy - 4, 4, 2, 80);
                                 }
                             }
                         }
                     }
                 }
 
-                /* Draw 3D Cursor Box */
+                /* Draw 3D Cursor Box (flashes Red/Yellow when reticle is on a visible alien voxel!) */
                 if (combat_anim_depth == 0 && g_input.my < HUD_Y &&
                     !g_battle.weapon_menu_open && !g_settings.menu_open &&
                     z == g_battle.view_level && x == g_battle.cur_x && y == g_battle.cur_y) {
-                    uint8_t box_col = (cmode != CURSOR_ARROW) ? 32 : 96;
+                    int on_alien = (cell->fog == FOG_VISIBLE && cell->unit_idx >= 0 &&
+                                    g_units[cell->unit_idx].active &&
+                                    g_units[cell->unit_idx].faction == 1);
+                    uint8_t box_col = (cmode == CURSOR_ARROW) ? 96 :
+                                      (on_alien && ((g_battle.anim_tick / 6) & 1)) ? 96 : 32;
                     draw_3d_cursor_box(x, y, z, box_col);
+                }
+            }
+        }
+    }
+
+    /* Render open-air hovering units (e.g. Floaters above max_z whose ground shadow is on <= max_z) */
+    for (z = max_z + 1; z < MAP_LEVS; z++) {
+        for (u_idx = 0; u_idx < MAX_UNITS; u_idx++) {
+            if (unit_draw_z[u_idx] == z && unit_shad_z[u_idx] >= 0 && unit_shad_z[u_idx] <= max_z) {
+                Unit *u = &g_units[u_idx];
+                int dx = unit_draw_x[u_idx], dy = unit_draw_y[u_idx];
+                int base_sx, base_sy, ux, uy, u_shade;
+                if (g_map[z][dy][dx].floor_id != FLOOR_NONE) continue;
+                isomap_tile_to_screen(u->x, u->y, u->z, &base_sx, &base_sy);
+                ux = base_sx + 4 + u->pixel_off_x;
+                uy = base_sy - 18 + u->pixel_off_y;
+                u_shade = g_map[u->z][u->y][u->x].light;
+                if (u_shade > 14) u_shade = 14;
+                if (u->death_anim >= 1 && u->death_anim <= 4) {
+                    vga_blit_shaded(base_sx, base_sy - 16, DEATH_W, DEATH_H,
+                                    spr_deaths[u->sprite_id % NUM_UNIT_SPRITES][u->death_anim - 1],
+                                    u_shade, VIEWPORT_H);
+                } else {
+                    vga_blit_shaded(ux, uy, UNIT_W, UNIT_H,
+                                    spr_units[u->sprite_id % NUM_UNIT_SPRITES][u->anim_pose & 3][u->dir],
+                                    u_shade, VIEWPORT_H);
+                    if (u_idx == g_battle.selected_unit) {
+                        vga_line_clip(ux + 12, uy - 6, ux + 9,  uy - 9, 96, VIEWPORT_H);
+                        vga_line_clip(ux + 12, uy - 6, ux + 15, uy - 9, 96, VIEWPORT_H);
+                        vga_line_clip(ux + 9,  uy - 9, ux + 15, uy - 9, 96, VIEWPORT_H);
+                    } else if (u->faction == 1 && uy - 4 >= 0 && uy - 2 <= VIEWPORT_H) {
+                        vga_rect_fill(ux + 10, uy - 4, 4, 2, 32);
+                    }
                 }
             }
         }
@@ -3552,14 +4058,20 @@ void isomap_render(void) {
         MapCell *hc = &g_map[g_battle.view_level][g_battle.cur_y][g_battle.cur_x];
         if (hc->fog != FOG_UNSEEN) {
             const char *utag = NULL;
-            switch (hc->obj_id) {
-                case OBJ_UFO_CORE:     utag = "ELERIUM CORE"; break;
-                case OBJ_UFO_NAV:      utag = "UFO NAV";      break;
-                case OBJ_UFO_COMPUTER: utag = "FLIGHT COMP";  break;
-                case OBJ_UFO_CRYO:     utag = "CRYO-POD";     break;
-                case OBJ_UFO_POD:      utag = "TECH POD";     break;
-                case OBJ_UFO_GRAVLIFT: utag = "GRAV-LIFT";    break;
-                default: break;
+            if (hc->fog == FOG_VISIBLE && hc->unit_idx >= 0 &&
+                g_units[hc->unit_idx].active && g_units[hc->unit_idx].faction == FACTION_CIVILIAN) {
+                utag = g_units[hc->unit_idx].name;
+            }
+            if (!utag) {
+                switch (hc->obj_id) {
+                    case OBJ_UFO_CORE:     utag = "ELERIUM CORE"; break;
+                    case OBJ_UFO_NAV:      utag = "UFO NAV";      break;
+                    case OBJ_UFO_COMPUTER: utag = "FLIGHT COMP";  break;
+                    case OBJ_UFO_CRYO:     utag = "CRYO-POD";     break;
+                    case OBJ_UFO_POD:      utag = "TECH POD";     break;
+                    case OBJ_UFO_GRAVLIFT: utag = "GRAV-LIFT";    break;
+                    default: break;
+                }
             }
             if (utag) {
                 int hsx, hsy;
@@ -3574,10 +4086,11 @@ void isomap_render(void) {
     /* Top-left compact tactical overlay: Location & Elevation Level */
     vga_print_shadow(4, 4, biome_titles[g_battle.biome_id], 96, 15);
     {
-        char lev_buf[32];
-        snprintf(lev_buf, sizeof(lev_buf), "LVL:%d  %s",
-                 g_battle.view_level, g_battle.night_mode ? "NIGHT" : "DAY");
-        vga_print_shadow(236, 4, lev_buf, 80, 15);
+        char lev_buf[36];
+        snprintf(lev_buf, sizeof(lev_buf), "CIV:%d/%d LVL:%d %s",
+                 g_battle.civilians_saved, g_battle.civilians_total,
+                 g_battle.view_level, g_battle.night_mode ? "NGT" : "DAY");
+        vga_print_shadow(SCREEN_W - vga_text_width(lev_buf) - 4, 4, lev_buf, 80, 15);
     }
 
     /* Mission Victory / Debrief Overlay Banner when sector is cleared */
@@ -3604,56 +4117,60 @@ void isomap_render(void) {
             }
         }
 
-        vga_rect_bevel(28, 10, 264, 128, 74, 96, 79);
-        vga_rect_fill(32, 14, 256, 120, 14);
-        vga_print_shadow(62, 18,
+        vga_rect_bevel(28, 6, 264, 134, 74, 96, 79);
+        vga_rect_fill(32, 10, 256, 126, 14);
+        vga_print_shadow(62, 13,
                          g_battle.mission_ended == 1 ? "MISSION ACCOMPLISHED!" : "MISSION FAILED!",
                          g_battle.mission_ended == 1 ? 96 : 33, 15);
-        vga_print(40, 30, biome_titles[g_battle.biome_id], 80);
+        vga_print(40, 24, biome_titles[g_battle.biome_id], 80);
 
-        snprintf(stat_buf, sizeof(stat_buf), "ALIENS KILLED: %-2d      KIA: %d",
-                 g_battle.aliens_killed, kia_cnt);
-        vga_print(40, 41, stat_buf, kia_cnt > 0 ? 113 : 18);
+        snprintf(stat_buf, sizeof(stat_buf), "ALIENS KILLED:%-2d KIA:%d SCORE:%d",
+                 g_battle.aliens_killed, kia_cnt, g_battle.mission_score);
+        vga_print(40, 34, stat_buf, kia_cnt > 0 ? 113 : 18);
 
-        snprintf(stat_buf, sizeof(stat_buf), "SALVAGE: +%d ALLOYS  +%d ELERIUM",
-                 g_battle.alloys_recovered, g_battle.elerium_recovered);
-        vga_print(40, 51, stat_buf, 144);
+        snprintf(stat_buf, sizeof(stat_buf), "CIVILIANS SAVED:%d/%d  KILLED:%d",
+                 g_battle.civilians_saved, g_battle.civilians_total, g_battle.civilians_killed);
+        vga_print(40, 44, stat_buf, g_battle.civilians_killed > 0 ? 113 : 80);
+
+        snprintf(stat_buf, sizeof(stat_buf), "SALVAGE:+%d ALLOY +%d ELER DMG:%d",
+                 g_battle.alloys_recovered, g_battle.elerium_recovered, g_battle.map_damage);
+        vga_print(40, 54, stat_buf, 144);
 
         if (g_battle.mission_ended == 1) {
             snprintf(stat_buf, sizeof(stat_buf), "TECH: +%d NAV +%d CRYO +%d POD +%d BODY",
                      g_battle.nav_recovered, g_battle.cryo_recovered,
                      g_battle.pods_recovered, g_battle.corpses_recovered);
-            vga_print(40, 61, stat_buf, 81);
+            vga_print(40, 64, stat_buf, 81);
             snprintf(stat_buf, sizeof(stat_buf), "SURVIVAL XP: +%d XP (+COMBAT XP)", surv_xp);
-            vga_print(40, 71, stat_buf, 80);
+            vga_print(40, 74, stat_buf, 80);
         } else {
-            vga_print(40, 66, "ENTIRE SQUAD LOST IN ACTION!", 33);
+            vga_print(40, 68, "ENTIRE SQUAD LOST IN ACTION!", 33);
         }
 
         if (promo_cnt == 1 && first_promo_idx >= 0) {
             const char *base_n = operative_strip_rank_prefix(g_units[first_promo_idx].name);
             snprintf(stat_buf, sizeof(stat_buf), "PROMOTED: %s %s!",
                      operative_rank_prefix(first_promo_rank), base_n);
-            vga_print_shadow(40, 84, stat_buf, 96, 15);
-            vga_print(40, 95, "RANK UP: +MAX TU, +AIM, +HP, +RCN!", 18);
+            vga_print_shadow(40, 86, stat_buf, 96, 15);
+            vga_print(40, 97, "RANK UP: +MAX TU, +AIM, +HP, +RCN!", 18);
         } else if (promo_cnt > 1) {
             snprintf(stat_buf, sizeof(stat_buf), "PROMOTIONS: %d OPERATIVES RANKED UP!", promo_cnt);
-            vga_print_shadow(40, 84, stat_buf, 96, 15);
-            vga_print(40, 95, "RANK UP: +MAX TU, +AIM, +HP, +RCN!", 18);
+            vga_print_shadow(40, 86, stat_buf, 96, 15);
+            vga_print(40, 97, "RANK UP: +MAX TU, +AIM, +HP, +RCN!", 18);
         } else if (g_battle.mission_ended == 1) {
-            vga_print(40, 84, "SQUAD GAINED COMBAT EXPERIENCE!", 96);
+            vga_print(40, 86, "SQUAD GAINED COMBAT EXPERIENCE!", 96);
             if (kia_cnt > 0) {
                 snprintf(stat_buf, sizeof(stat_buf), "%d KIA - NEW ROOKIE%s ASSIGNED AT HQ",
                          kia_cnt, kia_cnt > 1 ? "S" : "");
-                vga_print(40, 95, stat_buf, 113);
+                vga_print(40, 97, stat_buf, 113);
             } else {
-                vga_print(40, 95, "NO CASUALTIES - FULL SQUAD INTACT", 2);
+                vga_print(40, 97, "NO CASUALTIES - FULL SQUAD INTACT", 2);
             }
         } else {
-            vga_print(40, 84, "PERMADEATH: FALLEN AGENTS RECORDED", 113);
-            vga_print(40, 95, "HQ ASSIGNING REPLACEMENT ROOKIES...", 2);
+            vga_print(40, 86, "PERMADEATH: FALLEN AGENTS RECORDED", 113);
+            vga_print(40, 97, "HQ ASSIGNING REPLACEMENT ROOKIES...", 2);
         }
 
-        vga_print_shadow(56, 117, "CLICK OR PRESS ENTER FOR HQ!", 96, 15);
+        vga_print_shadow(56, 121, "CLICK OR PRESS ENTER FOR HQ!", 96, 15);
     }
 }

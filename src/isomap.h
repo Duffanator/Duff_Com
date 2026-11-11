@@ -8,7 +8,11 @@
 #define MAP_H    34
 #define MAP_LEVS 3
 
-#define MAX_UNITS 16
+#define MAX_UNITS 24
+
+#define FACTION_DUFFCOM  0
+#define FACTION_ALIEN    1
+#define FACTION_CIVILIAN 2
 
 /* Fog of War states */
 #define FOG_UNSEEN  0
@@ -44,8 +48,8 @@ typedef struct {
 
 typedef struct {
     int active;
-    int faction;        /* 0 = DUFF-COM, 1 = ALIEN */
-    int unit_type;      /* 0 = Operative, 1 = Sectoid, 2 = Floater, 3 = Muton */
+    int faction;        /* 0 = DUFF-COM, 1 = ALIEN, 2 = CIVILIAN */
+    int unit_type;      /* 0 = Operative, 1 = Sectoid, 2 = Floater, 3 = Muton, 4 = Civilian */
     int sprite_id;      /* Index into spr_units[0..NUM_UNIT_SPRITES-1] */
     int gender;         /* 0 = Male, 1 = Female */
     char name[20];
@@ -114,6 +118,12 @@ typedef struct {
     int cryo_recovered;     /* Intact Alien Cryo-Stasis Bio-Chambers recovered */
     int pods_recovered;     /* Intact Alien Tech / Ordnance Pods recovered */
     int corpses_recovered;  /* Alien bodies recovered for future autopsy research */
+    int civilians_total;    /* Total civilians present on this battle map */
+    int civilians_saved;    /* Civilians alive / rescued when mission ends */
+    int civilians_killed;   /* Total civilians killed during mission */
+    int civilians_killed_by_xcom; /* Civilians killed by DUFF-COM friendly fire */
+    int map_damage;         /* Collateral damage done to map walls & props */
+    int mission_score;      /* Calculated mission performance score */
     char status_msg[48];    /* Tactical ticker message on HUD */
     int status_timer;
     uint32_t anim_tick;     /* 70 Hz real-time frame counter for animated smoke & fire */

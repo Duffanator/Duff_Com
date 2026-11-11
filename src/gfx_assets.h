@@ -17,7 +17,7 @@
 #define FX_W     24
 #define FX_H     24
 
-#define NUM_UNIT_SPRITES 9
+#define NUM_UNIT_SPRITES 11
 #define NUM_PORTRAITS    12
 
 /* Unit Sprite Sheet Row Groups (each has 4 poses x 8 directions of 24x32) */
@@ -30,7 +30,9 @@ enum {
     UNIT_SPR_FEM_DARK,       /* Female Operative: dark bob / braided vanguard */
     UNIT_SPR_SECTOID,        /* Alien Sectoid */
     UNIT_SPR_FLOATER,        /* Alien Floater */
-    UNIT_SPR_MUTON           /* Alien Muton */
+    UNIT_SPR_MUTON,          /* Alien Muton */
+    UNIT_SPR_CIV_MALE,       /* Local Coopersburg Civilian (Male, unarmed) */
+    UNIT_SPR_CIV_FEM         /* Local Coopersburg Civilian (Female, unarmed) */
 };
 
 /* Floor Tile IDs */
@@ -51,6 +53,8 @@ enum {
     FLOOR_UFO_ROOF_E,   /* Rounded alien saucer dome East corner cap */
     FLOOR_UFO_ROOF_S,   /* Rounded alien saucer dome South corner cap */
     FLOOR_UFO_ROOF_W,   /* Rounded alien saucer dome West corner cap */
+    FLOOR_ARV_DECK,     /* Armored Response Vehicle diamond-plate interior troop deck */
+    FLOOR_ARV_ROOF,     /* Armored Response Vehicle olive/gunmetal rooftop plating */
     FLOOR_COUNT
 };
 
@@ -77,6 +81,11 @@ enum {
     WALL_UFO_HULL_DMG,  /* Scorched, buckled alien saucer hull w/ plasma leak */
     WALL_UFO_DOOR_CLOSED,/* Rounded oval alien containment airlock - closed (65 HP) */
     WALL_UFO_DOOR_OPEN, /* Rounded oval alien containment airlock - open (65 HP) */
+    WALL_ARV_HULL,      /* Armored Response Vehicle olive/gunmetal body panel (160 HP) */
+    WALL_ARV_WIN,       /* Armored Response Vehicle cab wall w/ ballistic visor (140 HP) */
+    WALL_ARV_WHEEL,     /* Armored Response Vehicle wheel arch & heavy off-road tire (160 HP) */
+    WALL_ARV_FRONT,     /* Armored Response Vehicle front grille, bumper & headlights (160 HP) */
+    WALL_ARV_DOOR_OPEN, /* Armored Response Vehicle open 2-tile side deployment bay header */
     WALL_COUNT
 };
 
@@ -141,6 +150,9 @@ extern uint8_t spr_objects[OBJ_COUNT][OBJ_W * OBJ_H];
 
 /* Unit sprites: [sprite_id 0..8][pose: 0=Stand, 1=Kneel, 2=WalkA, 3=WalkB][facing 0..7] */
 extern uint8_t spr_units[NUM_UNIT_SPRITES][4][8][UNIT_W * UNIT_H];
+
+/* Standalone ground shadow sprite rendered on the floor tile directly below each unit */
+extern uint8_t spr_unit_shadow[UNIT_W * UNIT_H];
 
 /* Death collapse & persistent corpse sprites: [sprite_id 0..8][stage: 0..2 collapse, 3=corpse] */
 extern uint8_t spr_deaths[NUM_UNIT_SPRITES][4][DEATH_W * DEATH_H];
