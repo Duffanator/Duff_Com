@@ -1,4 +1,4 @@
-param([switch]$ObjectsOnly)
+param([switch]$ObjectsOnly, [switch]$UnitsOnly)
 Add-Type -AssemblyName System.Drawing
 
 $csharp = @"
@@ -67,6 +67,12 @@ public class DuffArtGen {
                 if (u < lx && v < rx) PSet(b, x, y + 1, topCol);
             }
         }
+    }
+
+    public static void GenerateUnitsAndDeaths(string assetsDir) {
+        Directory.CreateDirectory(assetsDir);
+        GenUnits(Path.Combine(assetsDir, "UNITS.BMP"));
+        GenDeaths(Path.Combine(assetsDir, "DEATH.BMP"));
     }
 
     public static void GenerateAll(string assetsDir) {
@@ -1675,17 +1681,19 @@ public class DuffArtGen {
     }
 
     static void GenUnits(string path) {
-        // 8 cols (dir 0..7) x 36 rows (9 sprite groups * 4 poses) of 24x32 = 192 x 1152
+        // 8 cols (dir 0..7) x 60 rows (15 sprite groups * 4 poses) of 24x32 = 192 x 1920
         // 0..2: Male DUFF-COM Operatives (Visor/Brown, Blonde Flat-Top, Dark Buzzcut Vet)
         // 3..5: Female DUFF-COM Operatives (Redhead Ponytail, Blonde Shoulder, Dark Bob/Visor)
         // 6: Sectoid, 7: Floater, 8: Muton
-        using (Bitmap bmp = new Bitmap(192, 1152)) {
+        // 9..11: Male Coopersburg Civilians (Varsity Jacket, Red Plaid Flannel, Mill/Tech Vest)
+        // 12..14: Female Coopersburg Civilians (Redhead Teal Diner/Jacket, Blonde Gold Cardigan, Dark Berry Coat)
+        using (Bitmap bmp = new Bitmap(192, 1920)) {
             using (Graphics g = Graphics.FromImage(bmp)) g.Clear(Trans);
 
             int[] dxTab = new int[] { 0,  4,  6,  4,  0, -4, -6, -4 };
             int[] dyTab = new int[] {-4, -3,  0,  3,  4,  3,  0, -3 };
 
-            for (int type = 0; type < 9; type++) {
+            for (int type = 0; type < 15; type++) {
                 for (int pose = 0; pose < 4; pose++) {
                     int row = type * 4 + pose;
                     int oy = row * 32;
@@ -1954,7 +1962,7 @@ public class DuffArtGen {
                             spr[13, 7 + bob] = Color.FromArgb(255, 225, 50);
                             spr[16, 14 + bob] = Color.FromArgb(145, 255, 55);
 
-                        } else {
+                        } else if (type == 8) {
                             // MUTON: Hulking V-Tapered Muscular Green Bio-Armor + Purple Cyber-Helmet + Heavy Plasma!
                             for (int y = 19 + (pose == 1 ? 2 : 0); y < 27; y++) {
                                 spr[8  + legL/2, y] = Color.FromArgb(156, 72, 188);
@@ -1988,6 +1996,177 @@ public class DuffArtGen {
                             for (int gx = 11; gx <= 18; gx++) {
                                 spr[gx, 15 + yOff] = (gx >= 16) ? Color.FromArgb(155, 255, 65) : Color.FromArgb(92, 104, 118);
                             }
+                        } else {
+                            // ================================================================
+                            // COOPERSBURG LOCAL CIVILIANS (3 Male [9..11] + 3 Female [12..14])
+                            // ================================================================
+                            int civIdx = type - 9; // 0..2 Male, 3..5 Female
+                            bool isFem = (civIdx >= 3);
+                            bool backView = (dir == 0 || dir == 1 || dir == 7);
+
+                            Color skinHi = (civIdx == 2) ? Color.FromArgb(164, 104, 66) :
+                                           (civIdx == 5) ? Color.FromArgb(218, 162, 126) :
+                                                           Color.FromArgb(244, 192, 156);
+                            Color skinSh = (civIdx == 2) ? Color.FromArgb(122, 74, 44)  :
+                                           (civIdx == 5) ? Color.FromArgb(178, 124, 92) :
+                                                           Color.FromArgb(206, 148, 114);
+
+                            Color hairHi, hairSh, jktHi, jktMd, jktSh, slvHi, slvSh, teeHi, teeSh, pntHi, pntSh, shoeHi, shoeSh;
+                            switch (civIdx) {
+                                case 0: // Male 0: Coopersburg Amber/Tan Bomber Jacket + Cream Sleeves + Blue Jeans + High-Tops
+                                    hairHi = Color.FromArgb(128, 78, 42);   hairSh = Color.FromArgb(80, 46, 24);
+                                    jktHi  = Color.FromArgb(236, 154, 52);  jktMd  = Color.FromArgb(196, 116, 34); jktSh = Color.FromArgb(142, 76, 22);
+                                    slvHi  = Color.FromArgb(242, 232, 204); slvSh  = Color.FromArgb(188, 174, 144);
+                                    teeHi  = Color.FromArgb(245, 248, 252); teeSh  = Color.FromArgb(192, 202, 216);
+                                    pntHi  = Color.FromArgb(82, 142, 224);  pntSh  = Color.FromArgb(46, 86, 154);
+                                    shoeHi = Color.FromArgb(235, 238, 244); shoeSh = Color.FromArgb(184, 42, 42);
+                                    break;
+                                case 1: // Male 1: PA Farmer / Tradesman in Red Plaid Flannel + Indigo Denim + Work Boots
+                                    hairHi = Color.FromArgb(238, 196, 82);  hairSh = Color.FromArgb(178, 134, 42);
+                                    jktHi  = Color.FromArgb(218, 52, 46);   jktMd  = Color.FromArgb(168, 32, 30);  jktSh = Color.FromArgb(98, 22, 24);
+                                    slvHi  = Color.FromArgb(208, 46, 42);   slvSh  = Color.FromArgb(132, 26, 26);
+                                    teeHi  = Color.FromArgb(214, 196, 156); teeSh  = Color.FromArgb(164, 144, 108);
+                                    pntHi  = Color.FromArgb(64, 112, 188);  pntSh  = Color.FromArgb(36, 68, 126);
+                                    shoeHi = Color.FromArgb(146, 92, 48);   shoeSh = Color.FromArgb(94, 56, 28);
+                                    break;
+                                case 2: // Male 2: Mill Worker / Lab Tech in Olive Work Vest + Cyan Shirt + Slate Trousers
+                                    hairHi = Color.FromArgb(48, 40, 38);    hairSh = Color.FromArgb(24, 20, 20);
+                                    jktHi  = Color.FromArgb(112, 148, 76);  jktMd  = Color.FromArgb(82, 112, 54);  jktSh = Color.FromArgb(54, 76, 36);
+                                    slvHi  = Color.FromArgb(124, 204, 232); slvSh  = Color.FromArgb(78, 148, 182);
+                                    teeHi  = Color.FromArgb(148, 224, 245); teeSh  = Color.FromArgb(96, 168, 198);
+                                    pntHi  = Color.FromArgb(108, 118, 134); pntSh  = Color.FromArgb(66, 74, 88);
+                                    shoeHi = Color.FromArgb(68, 72, 80);    shoeSh = Color.FromArgb(38, 42, 48);
+                                    break;
+                                case 3: // Female 0: Redhead Diner Waitress / Retro Teal Jacket + White Collar + Jeans
+                                    hairHi = Color.FromArgb(228, 82, 40);   hairSh = Color.FromArgb(162, 46, 22);
+                                    jktHi  = Color.FromArgb(64, 224, 235);  jktMd  = Color.FromArgb(38, 174, 196); jktSh = Color.FromArgb(24, 118, 144);
+                                    slvHi  = Color.FromArgb(78, 234, 242);  slvSh  = Color.FromArgb(34, 158, 182);
+                                    teeHi  = Color.FromArgb(248, 248, 252); teeSh  = Color.FromArgb(204, 212, 226);
+                                    pntHi  = Color.FromArgb(84, 146, 228);  pntSh  = Color.FromArgb(48, 88, 158);
+                                    shoeHi = Color.FromArgb(232, 236, 242); shoeSh = Color.FromArgb(148, 158, 174);
+                                    break;
+                                case 4: // Female 1: Golden-Blonde Shopper in Gold Cardigan + Lavender Top + Jeans
+                                    hairHi = Color.FromArgb(252, 224, 96);  hairSh = Color.FromArgb(204, 162, 52);
+                                    jktHi  = Color.FromArgb(250, 208, 64);  jktMd  = Color.FromArgb(212, 162, 38); jktSh = Color.FromArgb(158, 114, 24);
+                                    slvHi  = Color.FromArgb(246, 202, 58);  slvSh  = Color.FromArgb(186, 138, 30);
+                                    teeHi  = Color.FromArgb(216, 164, 238); teeSh  = Color.FromArgb(164, 112, 192);
+                                    pntHi  = Color.FromArgb(76, 136, 218);  pntSh  = Color.FromArgb(44, 82, 148);
+                                    shoeHi = Color.FromArgb(156, 98, 52);   shoeSh = Color.FromArgb(102, 62, 32);
+                                    break;
+                                default: // Female 2: Raven-Dark Bob in Crimson/Berry Coat + Cream Blouse + Navy Slacks
+                                    hairHi = Color.FromArgb(56, 66, 88);    hairSh = Color.FromArgb(26, 30, 42);
+                                    jktHi  = Color.FromArgb(218, 64, 108);  jktMd  = Color.FromArgb(172, 42, 78);  jktSh = Color.FromArgb(118, 26, 52);
+                                    slvHi  = Color.FromArgb(212, 58, 102);  slvSh  = Color.FromArgb(148, 34, 66);
+                                    teeHi  = Color.FromArgb(248, 240, 218); teeSh  = Color.FromArgb(198, 186, 162);
+                                    pntHi  = Color.FromArgb(62, 88, 148);   pntSh  = Color.FromArgb(36, 52, 96);
+                                    shoeHi = Color.FromArgb(58, 62, 72);    shoeSh = Color.FromArgb(32, 36, 44);
+                                    break;
+                            }
+
+                            // 1. Civilian Denim Jeans / Slacks & Shoes
+                            int ly0 = 19 + (pose == 1 ? 2 : 0);
+                            int lFootY = Math.Min(27, 26 + legL / 2);
+                            int rFootY = Math.Min(27, 26 + legR / 2);
+                            int lx0 = 9 + legL / 2;
+                            int rx0 = 13 + legR / 2;
+
+                            for (int y = ly0; y <= lFootY; y++) {
+                                spr[lx0, y]     = pntHi;
+                                spr[lx0 + 1, y] = pntSh;
+                            }
+                            for (int y = ly0; y <= rFootY; y++) {
+                                spr[rx0, y]     = pntHi;
+                                spr[rx0 + 1, y] = pntSh;
+                            }
+                            spr[lx0 - 1, lFootY + 1] = shoeSh;
+                            spr[lx0,     lFootY + 1] = shoeHi;
+                            spr[lx0 + 1, lFootY + 1] = shoeSh;
+                            spr[rx0,     rFootY + 1] = shoeHi;
+                            spr[rx0 + 1, rFootY + 1] = shoeSh;
+
+                            // 2. Civilian Jacket / Flannel / Cardigan & Undershirt (Unarmed!)
+                            int tTop = 11 + yOff;
+                            int tBot = 19 + (pose == 1 ? 1 : 0);
+                            for (int y = tTop; y < tBot; y++) {
+                                int dy = y - tTop;
+                                int x0 = isFem ? (dy >= 5 ? 9 : 8) : (dy >= 6 ? 8 : 7);
+                                int x1 = isFem ? (dy >= 5 ? 14 : 15) : (dy >= 6 ? 15 : 16);
+
+                                for (int x = x0; x <= x1; x++) {
+                                    if (y == tBot - 1) {
+                                        // Leather belt & buckle
+                                        spr[x, y] = (x == 11 || x == 12) ? Color.FromArgb(242, 206, 68) : Color.FromArgb(72, 48, 30);
+                                    } else if (!backView && (x == 11 || x == 12) && dy <= 5) {
+                                        // Open-front jacket showing shirt/blouse underneath
+                                        spr[x, y] = (x == 11) ? teeHi : teeSh;
+                                    } else if (civIdx == 1 && ((x + y) & 1) == 0) {
+                                        // Plaid flannel check pattern for PA Farmer/Tradesman
+                                        spr[x, y] = (x < 12) ? jktMd : jktSh;
+                                    } else {
+                                        spr[x, y] = (x <= x0 + 1) ? jktHi : (x >= x1 - 1 ? jktSh : jktMd);
+                                    }
+                                }
+                            }
+
+                            // 3. Unarmed Civilian Arms & Hands (swinging when walking, raised in panic when crouched!)
+                            int armSwingL = (pose == 2) ?  1 : (pose == 3 ? -1 : 0);
+                            int armSwingR = (pose == 2) ? -1 : (pose == 3 ?  1 : 0);
+                            int lxArm = isFem ? 7 : 6;
+                            int rxArm = isFem ? 16 : 17;
+                            if (pose == 1) {
+                                // Cowering / Panic pose: hands raised near head!
+                                for (int ay = 10 + yOff; ay <= 14 + yOff; ay++) {
+                                    spr[lxArm, ay] = slvHi;
+                                    spr[rxArm, ay] = slvSh;
+                                }
+                                spr[lxArm, 9 + yOff]  = skinHi;
+                                spr[rxArm, 9 + yOff]  = skinSh;
+                            } else {
+                                for (int ay = 12 + yOff; ay <= 16 + yOff; ay++) {
+                                    spr[lxArm, ay + armSwingL] = slvHi;
+                                    spr[rxArm, ay + armSwingR] = slvSh;
+                                }
+                                spr[lxArm, 17 + yOff + armSwingL] = skinHi;
+                                spr[rxArm, 17 + yOff + armSwingR] = skinSh;
+                            }
+
+                            // 4. Civilian Head, Hair & Facial Features
+                            int hTop = 4 + yOff;
+                            int hBot = 10 + yOff;
+                            for (int y = hTop; y <= hBot; y++) {
+                                int x0 = (y <= 5 + yOff) ? 9 : 8;
+                                int x1 = (y <= 5 + yOff) ? 14 : 15;
+                                if (y >= 8 + yOff && !isFem) { x0 = 9; x1 = 14; }
+                                if (y == hBot) { x0 = 10; x1 = 13; }
+
+                                for (int x = x0; x <= x1; x++) {
+                                    bool isHair = backView || (y <= 6 + yOff) ||
+                                                  (dir == 2 && x <= 9) || (dir == 6 && x >= 14) ||
+                                                  (isFem && (x == x0 || x == x1) && y <= 9 + yOff);
+                                    if (isHair) {
+                                        spr[x, y] = (x < 12 || y <= 5 + yOff) ? hairHi : hairSh;
+                                    } else {
+                                        spr[x, y] = (x < 12) ? skinHi : skinSh;
+                                    }
+                                }
+                            }
+                            if (isFem) {
+                                if (civIdx == 3) {
+                                    int px = (dir >= 1 && dir <= 3) ? 7 : 15;
+                                    for (int py = 6 + yOff; py <= 10 + yOff; py++)
+                                        spr[px, py] = (py <= 7 + yOff) ? hairHi : hairSh;
+                                } else if (civIdx == 4) {
+                                    for (int py = 7 + yOff; py <= 11 + yOff; py++) {
+                                        spr[8,  py] = hairHi;
+                                        spr[15, py] = hairSh;
+                                    }
+                                }
+                            }
+                            if (!backView) {
+                                int eyeShift = (dir == 2 || dir == 3) ? 1 : (dir == 5 || dir == 6) ? -1 : 0;
+                                spr[10 + eyeShift, 7 + yOff] = Color.FromArgb(22, 26, 36);
+                                spr[13 + eyeShift, 7 + yOff] = Color.FromArgb(22, 26, 36);
+                            }
                         }
 
                         // Apply 1px dark silhouette outline around non-transparent pixels!
@@ -2012,11 +2191,11 @@ public class DuffArtGen {
 
     static void GenDeaths(string path) {
         // 4 cols (stage 0..3: Agony Hit, Knee Buckle, Collapse, Persistent Prone Corpse)
-        // x 9 rows (sprite_id 0..8: 6 DUFF-COM Operatives + Sectoid + Floater + Muton) of 32x32 = 128 x 288
-        using (Bitmap bmp = new Bitmap(128, 288)) {
+        // x 15 rows (sprite_id 0..14: 6 Operatives + 3 Aliens + 6 Civilians) of 32x32 = 128 x 480
+        using (Bitmap bmp = new Bitmap(128, 480)) {
             using (Graphics g = Graphics.FromImage(bmp)) g.Clear(Trans);
 
-            for (int type = 0; type < 9; type++) {
+            for (int type = 0; type < 15; type++) {
                 int oy = type * 32;
 
                 for (int stg = 0; stg < 4; stg++) {
@@ -2272,7 +2451,7 @@ public class DuffArtGen {
                             spr[8, 21] = Color.FromArgb(196, 150, 32);
                         }
 
-                    } else {
+                    } else if (type == 8) {
                         // ====================================================================
                         // MUTON: Hulking Green Bio-Armor + Purple Cyber-Suit + Green Ichor
                         // ====================================================================
@@ -2341,6 +2520,128 @@ public class DuffArtGen {
                             // Dropped Heavy Plasma Cannon
                             for (int x = 11; x <= 18; x++)
                                 spr[x, 28] = (x <= 12) ? ichHi : Color.FromArgb(92, 104, 118);
+                        }
+                    } else {
+                        // ====================================================================
+                        // COOPERSBURG CIVILIANS (Matching all 6 Civilian Outfits & Hairstyles)
+                        // ====================================================================
+                        int civIdx = type - 9;
+                        Color skinHi = (civIdx == 2) ? Color.FromArgb(164, 104, 66) :
+                                       (civIdx == 5) ? Color.FromArgb(218, 162, 126) :
+                                                       Color.FromArgb(244, 192, 156);
+                        Color skinSh = (civIdx == 2) ? Color.FromArgb(122, 74, 44)  :
+                                       (civIdx == 5) ? Color.FromArgb(178, 124, 92) :
+                                                       Color.FromArgb(206, 148, 114);
+                        Color hairHi, hairSh, jktHi, jktMd, jktSh, pntMd, pntSh, bootC;
+                        switch (civIdx) {
+                            case 0:
+                                hairHi = Color.FromArgb(128, 78, 42);  hairSh = Color.FromArgb(80, 46, 24);
+                                jktHi  = Color.FromArgb(236, 154, 52); jktMd  = Color.FromArgb(196, 116, 34); jktSh = Color.FromArgb(142, 76, 22);
+                                pntMd  = Color.FromArgb(82, 142, 224); pntSh  = Color.FromArgb(46, 86, 154);
+                                bootC  = Color.FromArgb(224, 228, 236);
+                                break;
+                            case 1:
+                                hairHi = Color.FromArgb(238, 196, 82); hairSh = Color.FromArgb(178, 134, 42);
+                                jktHi  = Color.FromArgb(218, 52, 46);  jktMd  = Color.FromArgb(168, 32, 30);  jktSh = Color.FromArgb(98, 22, 24);
+                                pntMd  = Color.FromArgb(64, 112, 188); pntSh  = Color.FromArgb(36, 68, 126);
+                                bootC  = Color.FromArgb(124, 76, 38);
+                                break;
+                            case 2:
+                                hairHi = Color.FromArgb(48, 40, 38);   hairSh = Color.FromArgb(24, 20, 20);
+                                jktHi  = Color.FromArgb(112, 148, 76); jktMd  = Color.FromArgb(82, 112, 54);  jktSh = Color.FromArgb(54, 76, 36);
+                                pntMd  = Color.FromArgb(108, 118, 134);pntSh  = Color.FromArgb(66, 74, 88);
+                                bootC  = Color.FromArgb(54, 58, 66);
+                                break;
+                            case 3:
+                                hairHi = Color.FromArgb(228, 82, 40);  hairSh = Color.FromArgb(162, 46, 22);
+                                jktHi  = Color.FromArgb(64, 224, 235); jktMd  = Color.FromArgb(38, 174, 196); jktSh = Color.FromArgb(24, 118, 144);
+                                pntMd  = Color.FromArgb(84, 146, 228); pntSh  = Color.FromArgb(48, 88, 158);
+                                bootC  = Color.FromArgb(214, 220, 230);
+                                break;
+                            case 4:
+                                hairHi = Color.FromArgb(252, 224, 96); hairSh = Color.FromArgb(204, 162, 52);
+                                jktHi  = Color.FromArgb(250, 208, 64); jktMd  = Color.FromArgb(212, 162, 38); jktSh = Color.FromArgb(158, 114, 24);
+                                pntMd  = Color.FromArgb(76, 136, 218); pntSh  = Color.FromArgb(44, 82, 148);
+                                bootC  = Color.FromArgb(136, 84, 42);
+                                break;
+                            default:
+                                hairHi = Color.FromArgb(56, 66, 88);   hairSh = Color.FromArgb(26, 30, 42);
+                                jktHi  = Color.FromArgb(218, 64, 108); jktMd  = Color.FromArgb(172, 42, 78);  jktSh = Color.FromArgb(118, 26, 52);
+                                pntMd  = Color.FromArgb(62, 88, 148);  pntSh  = Color.FromArgb(36, 52, 96);
+                                bootC  = Color.FromArgb(46, 50, 60);
+                                break;
+                        }
+                        Color bldHi = Color.FromArgb(218, 30, 36);
+                        Color bldDk = Color.FromArgb(132, 16, 22);
+
+                        if (stg == 0) {
+                            // Stage 0: Fatal hit! Thrown backward, unarmed hands flung wide, chest blood burst
+                            for (int y = 18; y <= 24; y++) {
+                                spr[12, y] = pntMd; spr[13, y] = pntSh;
+                                spr[17, y] = pntMd; spr[18, y] = pntSh;
+                            }
+                            spr[11, 25] = bootC; spr[12, 25] = bootC; spr[13, 25] = bootC;
+                            spr[17, 25] = bootC; spr[18, 25] = bootC; spr[19, 25] = bootC;
+                            for (int y = 10; y <= 17; y++)
+                                for (int x = 11; x <= 19; x++)
+                                    spr[x, y] = (x < 15) ? jktHi : (x < 18 ? jktMd : jktSh);
+                            for (int i = 0; i < 4; i++) {
+                                spr[10 - i, 12 - i / 2] = (i == 3) ? skinHi : jktHi;
+                                spr[20 + i, 12 + i / 2] = (i == 3) ? skinSh : jktMd;
+                            }
+                            for (int y = 4; y <= 9; y++)
+                                for (int x = 11; x <= 16; x++)
+                                    spr[x, y] = (y <= 5 || x == 11) ? hairHi : (x < 14 ? skinHi : skinSh);
+                            spr[14, 8] = Color.FromArgb(36, 14, 18);
+                            spr[14, 12] = bldHi; spr[15, 13] = bldHi; spr[16, 12] = bldDk;
+                            spr[13, 14] = bldDk; spr[17, 11] = bldHi;
+                        } else if (stg == 1) {
+                            // Stage 1: Buckling onto knees
+                            for (int y = 21; y <= 25; y++)
+                                for (int x = 13; x <= 21; x++)
+                                    if (x <= 16 || x >= 18) spr[x, y] = (y == 25) ? bootC : pntSh;
+                            for (int y = 13; y <= 21; y++)
+                                for (int x = 10; x <= 18; x++)
+                                    spr[x, y] = (x < 14) ? jktHi : (x < 17 ? jktMd : jktSh);
+                            for (int y = 8; y <= 13; y++)
+                                for (int x = 8; x <= 13; x++)
+                                    spr[x, y] = (y <= 10) ? hairHi : skinSh;
+                            spr[13, 17] = bldHi; spr[14, 18] = bldDk; spr[14, 24] = bldDk; spr[15, 25] = bldHi;
+                        } else if (stg == 2) {
+                            // Stage 2: Collapsing horizontally toward ground
+                            for (int y = 20; y <= 25; y++)
+                                for (int x = 18; x <= 25; x++)
+                                    spr[x, y] = (x >= 23) ? bootC : pntSh;
+                            for (int y = 18; y <= 24; y++)
+                                for (int x = 11; x <= 18; x++)
+                                    spr[x, y] = (y <= 20) ? jktHi : jktMd;
+                            for (int y = 16; y <= 21; y++)
+                                for (int x = 7; x <= 11; x++)
+                                    spr[x, y] = (x <= 8 || y <= 17) ? hairHi : skinHi;
+                            spr[14, 23] = bldHi; spr[15, 24] = bldDk;
+                        } else {
+                            // Stage 3: Persistent Prone Civilian Corpse (angled inside floor diamond, no weapon)
+                            for (int y = 20; y <= 27; y++)
+                                for (int x = 10; x <= 20; x++)
+                                    if ((x - 15) * (x - 15) + (y - 24) * (y - 24) * 3 <= 24)
+                                        spr[x, y] = ((x + y) & 1) == 0 ? bldDk : bldHi;
+                            for (int i = 0; i < 7; i++) {
+                                spr[17 + i, 22 + i / 3] = (i >= 5) ? bootC : pntMd;
+                                spr[17 + i, 23 + i / 3] = (i >= 5) ? bootC : pntSh;
+                                if (i < 6) spr[16 + i, 25 + i / 3] = (i >= 4) ? bootC : pntSh;
+                            }
+                            for (int y = 21; y <= 25; y++) {
+                                int rowShift = (y - 21) / 2;
+                                for (int x = 11 + rowShift; x <= 17 + rowShift; x++)
+                                    spr[x, y] = (x == 17 + rowShift) ? Color.FromArgb(72, 48, 30) :
+                                                (y <= 22) ? jktHi : (y <= 24 ? jktMd : jktSh);
+                            }
+                            spr[10, 24] = jktMd; spr[9, 25] = jktHi; spr[8, 25] = skinSh;
+                            spr[13, 19] = jktMd; spr[14, 19] = skinHi;
+                            for (int y = 19; y <= 23; y++)
+                                for (int x = 7; x <= 11; x++)
+                                    if (!((y == 19 || y == 23) && (x == 7 || x == 11)))
+                                        spr[x, y] = (x <= 8 || y == 19) ? hairHi : (x == 9 && y <= 20 ? hairSh : skinHi);
                         }
                     }
 
@@ -2915,6 +3216,9 @@ Add-Type -TypeDefinition $csharp -ReferencedAssemblies System.Drawing
 if ($ObjectsOnly) {
     [DuffArtGen]::GenObjects((Join-Path (Resolve-Path "assets").Path "OBJECTS.BMP"))
     Write-Output "Generated assets/OBJECTS.BMP!"
+} elseif ($UnitsOnly) {
+    [DuffArtGen]::GenerateUnitsAndDeaths((Resolve-Path "assets").Path)
+    Write-Output "Generated assets/UNITS.BMP and assets/DEATH.BMP!"
 } else {
     [DuffArtGen]::GenerateAll((Resolve-Path "assets").Path)
     & (Join-Path $PSScriptRoot "gen_items.ps1")

@@ -63,12 +63,10 @@ static void init_blank_map(uint8_t base_floor) {
     for (z = 0; z < MAP_LEVS; z++) {
         for (y = 0; y < MAP_H; y++) {
             for (x = 0; x < MAP_W; x++) {
-                g_map[z][y][x].unit_idx    = -1;
-                g_map[z][y][x].gnd_item[0] = -1;
-                g_map[z][y][x].gnd_item[1] = -1;
-                g_map[z][y][x].gnd_item[2] = -1;
-                g_map[z][y][x].gnd_item[3] = -1;
-                g_map[z][y][x].fog         = FOG_UNSEEN;
+                g_map[z][y][x].unit_idx = -1;
+                memset(g_map[z][y][x].gnd_item,  -1, sizeof(g_map[z][y][x].gnd_item));
+                memset(g_map[z][y][x].gnd_prime, -1, sizeof(g_map[z][y][x].gnd_prime));
+                g_map[z][y][x].fog      = FOG_UNSEEN;
                 if (z == 0) {
                     g_map[0][y][x].floor_id = base_floor;
                 }
@@ -189,9 +187,65 @@ static int prop_tile_clear(int x, int y, int z) {
     return 1;
 }
 
+static int is_bldg_wall(uint8_t w) {
+    return (w == WALL_BRICK        || w == WALL_BRICK_WIN    ||
+            w == WALL_DINER_CHROME || w == WALL_DINER_GLASS  ||
+            w == WALL_BARN_WOOD    || w == WALL_STEEL        ||
+            w == WALL_BRICK_BROKEN || w == WALL_DINER_BROKEN ||
+            w == WALL_BRICK_DMG    || w == WALL_DINER_DMG    ||
+            w == WALL_BARN_DMG     || w == WALL_STEEL_DMG);
+}
+
+static int tile_against_bldg_wall(int x, int y, int z) {
+    if ((unsigned)x >= MAP_W || (unsigned)y >= MAP_H || (unsigned)z >= MAP_LEVS) return 0;
+    if (is_bldg_wall(g_map[z][y][x].wall_north)) return 1;
+    if (is_bldg_wall(g_map[z][y][x].wall_west))  return 1;
+    if (y + 1 < MAP_H && is_bldg_wall(g_map[z][y + 1][x].wall_north)) return 1;
+    if (x + 1 < MAP_W && is_bldg_wall(g_map[z][y][x + 1].wall_west))  return 1;
+    return 0;
+}
+
 static void place_prop_if_clear(int x, int y, int z, uint8_t obj_id) {
     if (!prop_tile_clear(x, y, z)) return;
+    if (obj_id == OBJ_BARREL && !tile_against_bldg_wall(x, y, z)) return;
     g_map[z][y][x].obj_id = obj_id;
+}
+
+/* Place an explosive barrel flush against an exterior (or interior) building wall */
+static int place_barrel_against_bldg(void) {
+    int tries;
+    if (g_num_bldgs <= 0) return 0;
+
+    for (tries = 0; tries < 48; tries++) {
+        const BldgRect *b = &g_bldgs[rand() % g_num_bldgs];
+        int side = rand() & 3;
+        int outside = (tries < 36) ? 1 : 0;
+        int tx, ty;
+        if (!b->valid) continue;
+
+        if (side == 0) {        /* North wall */
+            tx = rrange(b->x0, b->x1);
+            ty = outside ? (b->y0 - 1) : b->y0;
+        } else if (side == 2) { /* South wall */
+            tx = rrange(b->x0, b->x1);
+            ty = outside ? (b->y1 + 1) : b->y1;
+        } else if (side == 3) { /* West wall */
+            tx = outside ? (b->x0 - 1) : b->x0;
+            ty = rrange(b->y0, b->y1);
+        } else {                /* East wall */
+            tx = outside ? (b->x1 + 1) : b->x1;
+            ty = rrange(b->y0, b->y1);
+        }
+
+        if ((unsigned)tx >= MAP_W || (unsigned)ty >= MAP_H) continue;
+        if (outside && zone_map[ty][tx] != ZONE_FREE) continue;
+        if (!prop_tile_clear(tx, ty, 0)) continue;
+        if (!tile_against_bldg_wall(tx, ty, 0)) continue;
+
+        g_map[0][ty][tx].obj_id = OBJ_BARREL;
+        return 1;
+    }
+    return 0;
 }
 
 /* Place a 2-tile vehicle (2x1 along +X when along_y==0, or 1x2 along +Y when along_y==1) */
@@ -830,7 +884,7 @@ static void gen_biome_rte309(void) {
         carve_rect_door(g.x0, g.y0, g.x1, g.y1, 2, g.x0 + 2, WALL_DOOR_OPEN);
         carve_rect_door(g.x0, g.y0, g.x1, g.y1, 0, g.x0 + 2, WALL_DOOR_CLOSED);
         place_stairs_at(0, g.x0, g.y0);
-        place_prop_if_clear(g.x0 + 3, g.y0 + 3, 0, OBJ_BARREL);
+        place_prop_if_clear(g.x1, g.y1, 0, OBJ_BARREL);
         place_prop_if_clear(g.x0 + 1, g.y0 + 2, 0, OBJ_CRATE);
     }
 
@@ -879,9 +933,13 @@ static void gen_biome_rte309(void) {
             }
         }
         for (i = 0; i < 8; i++) {
-            int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
-            if (zone_map[ry][rx] == ZONE_FREE) {
-                place_prop_if_clear(rx, ry, 0, (i & 1) ? OBJ_BARREL : OBJ_CRATE);
+            if (i & 1) {
+                place_barrel_against_bldg();
+            } else {
+                int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
+                if (zone_map[ry][rx] == ZONE_FREE) {
+                    place_prop_if_clear(rx, ry, 0, OBJ_CRATE);
+                }
             }
         }
     }
@@ -968,7 +1026,7 @@ static void gen_biome_pa_farm(void) {
             }
         }
         place_prop_if_clear(barn.x0 + 1, barn.y0 + 1, 0, OBJ_CRATE);
-        place_prop_if_clear(barn.x1 - 1, barn.y1 - 1, 0, OBJ_BARREL);
+        place_prop_if_clear(barn.x1, barn.y1, 0, OBJ_BARREL);
         place_prop_if_clear(loft_style ? barn.x1 - 1 : barn.x0 + 1,
                             loft_style ? barn.y0 + 1 : barn.y1 - 1, 1, OBJ_CRATE);
     }
@@ -996,7 +1054,7 @@ static void gen_biome_pa_farm(void) {
         carve_rect_door(sh.x0, sh.y0, sh.x1, sh.y1, 0, sh.x0 + 2, WALL_DOOR_CLOSED);
         place_stairs_at(0, sh.x0, sh.y0);
         place_prop_if_clear(sh.x0 + 1, sh.y0 + 1, 0, OBJ_CRATE);
-        place_prop_if_clear(sh.x1 - 1, sh.y1 - 1, 0, OBJ_BARREL);
+        place_prop_if_clear(sh.x1, sh.y1, 0, OBJ_BARREL);
     }
 
     /* 5 Randomized Fenced Pennsylvania Cornfields */
@@ -1029,10 +1087,14 @@ static void gen_biome_pa_farm(void) {
         }
     }
     for (i = 0; i < 8; i++) {
-        int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
-        if (zone_map[ry][rx] == ZONE_FREE) {
-            uint8_t obj = (i < 4) ? OBJ_BARREL : (i < 7 ? OBJ_CRATE : OBJ_STREETLAMP);
-            place_prop_if_clear(rx, ry, 0, obj);
+        if (i < 4) {
+            place_barrel_against_bldg();
+        } else {
+            int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
+            if (zone_map[ry][rx] == ZONE_FREE) {
+                uint8_t obj = (i < 7) ? OBJ_CRATE : OBJ_STREETLAMP;
+                place_prop_if_clear(rx, ry, 0, obj);
+            }
         }
     }
 }
@@ -1141,7 +1203,7 @@ static void gen_biome_suburb(void) {
         carve_rect_door(g.x0, g.y0, g.x1, g.y1, 2, g.x0 + 2, WALL_DOOR_OPEN);
         carve_rect_door(g.x0, g.y0, g.x1, g.y1, 0, g.x0 + 2, WALL_DOOR_CLOSED);
         place_stairs_at(0, g.x0, g.y0);
-        place_prop_if_clear(g.x1 - 1, g.y1 - 1, 0, OBJ_BARREL);
+        place_prop_if_clear(g.x1, g.y1, 0, OBJ_BARREL);
         place_prop_if_clear(g.x0 + 1, g.y0 + 1, 0, OBJ_CRATE);
     }
 
@@ -1171,9 +1233,13 @@ static void gen_biome_suburb(void) {
         }
     }
     for (i = 0; i < 7; i++) {
-        int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
-        if (zone_map[ry][rx] == ZONE_FREE) {
-            place_prop_if_clear(rx, ry, 0, (i < 2) ? OBJ_DINER_BOOTH : ((i & 1) ? OBJ_CRATE : OBJ_BARREL));
+        if (i >= 2 && !(i & 1)) {
+            place_barrel_against_bldg();
+        } else {
+            int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
+            if (zone_map[ry][rx] == ZONE_FREE) {
+                place_prop_if_clear(rx, ry, 0, (i < 2) ? OBJ_DINER_BOOTH : OBJ_CRATE);
+            }
         }
     }
 }
@@ -1275,7 +1341,11 @@ static void gen_biome_steel(void) {
                 place_stairs_at(1, t.x0, t.y1);
                 place_prop_if_clear(t.x0 + 1, t.y0 + 1, 1, OBJ_CRATE);
             }
-            place_prop_if_clear(mx, my, 0, (i & 1) ? OBJ_CRATE : OBJ_BARREL);
+            if (i & 1) {
+                place_prop_if_clear(mx, my, 0, OBJ_CRATE);
+            } else {
+                place_prop_if_clear(t.x1, t.y0, 0, OBJ_BARREL);
+            }
             towers[num_towers++] = t;
         }
     }
@@ -1301,10 +1371,14 @@ static void gen_biome_steel(void) {
         }
     }
     for (i = 0; i < 18; i++) {
-        int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
-        if (zone_map[ry][rx] == ZONE_FREE) {
-            uint8_t obj = (i < 9) ? OBJ_BARREL : (i < 14) ? OBJ_CRATE : OBJ_STREETLAMP;
-            place_prop_if_clear(rx, ry, 0, obj);
+        if (i < 9) {
+            place_barrel_against_bldg();
+        } else {
+            int rx = rrange(2, LOT_MAX_X), ry = rrange(2, LOT_MAX_Y);
+            if (zone_map[ry][rx] == ZONE_FREE) {
+                uint8_t obj = (i < 14) ? OBJ_CRATE : OBJ_STREETLAMP;
+                place_prop_if_clear(rx, ry, 0, obj);
+            }
         }
     }
 }
@@ -1785,8 +1859,11 @@ static void gen_biome_base_defense(void) {
                                 FLOOR_SIDEWALK, FLOOR_ROOF_TAR,
                                 WALL_STEEL, WALL_BRICK_WIN, 20, 1);
                 place_prop_if_clear(bx0 + 1, by0 + 1, 0, OBJ_CRATE);
-                place_prop_if_clear(bx1 - 1, by0 + 1, 0,
-                                    (fid == FAC_UPG_WORKSHOP) ? OBJ_UFO_POD : OBJ_BARREL);
+                if (fid == FAC_UPG_WORKSHOP) {
+                    place_prop_if_clear(bx1 - 1, by0 + 1, 0, OBJ_UFO_POD);
+                } else {
+                    place_prop_if_clear(bx1, by0, 0, OBJ_BARREL);
+                }
             }
 
             /* Carve doorways on all 4 sides so connected base facilities link together! */
@@ -2029,7 +2106,7 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
                 }
             }
 
-            plan->civ_gender[c] = gender;
+            plan->civ_gender[c] = (gender ? 3 : 0) + ((c / 2 + rand()) % 3); /* 0..2 Male variants, 3..5 Female variants */
             plan->civ_x[c]      = cx_sp;
             plan->civ_y[c]      = cy_sp;
             plan->civ_z[c]      = cz_sp;

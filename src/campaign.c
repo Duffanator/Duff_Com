@@ -323,22 +323,43 @@ int campaign_arv_used_space(void) {
 }
 
 int campaign_arv_max_space(void) {
-    return g_camp.tech_done[TECH_UFO_CONSTRUCTION] ? 42 : 28;
+    return g_camp.tech_done[TECH_UFO_CONSTRUCTION] ? 100 : 75;
 }
 
-static int cycle_researched_weapon(int cur_wep) {
-    int i;
-    for (i = 1; i <= ITEM_COUNT; i++) {
-        int cand = (cur_wep + i) % ITEM_COUNT;
-        if (item_is_weapon(cand) && campaign_is_item_researched(cand)) {
-            return cand;
-        }
+static int take_arv_or_base_item(int id) {
+    if (id < 0 || id >= ITEM_COUNT) return 0;
+    if (g_camp.arv_cargo[id] > 0) {
+        g_camp.arv_cargo[id]--;
+        return 1;
     }
-    return ITEM_ASSAULT_RIFLE;
+    if (g_battle.biome_id == BIOME_BASE_DEFENSE && g_camp.stores[id] > 0) {
+        g_camp.stores[id]--;
+        return 1;
+    }
+    return 0;
+}
+
+static void return_unit_item_to_camp(int id) {
+    const ItemDef *d;
+    if (id < 0 || id >= ITEM_COUNT) return;
+    d = item_get_def(id);
+    if (d->category <= ICAT_UTILITY && campaign_is_item_researched(id) &&
+        campaign_arv_used_space() + d->store_space <= campaign_arv_max_space()) {
+        g_camp.arv_cargo[id]++;
+    } else {
+        g_camp.stores[id]++;
+    }
 }
 
 void campaign_sync_squad_units(void) {
-    int i;
+    static const int wep_prio[] = {
+        ITEM_PLASMA_RIFLE, ITEM_HEAVY_PLASMA, ITEM_LASER_RIFLE, ITEM_HEAVY_LASER,
+        ITEM_ASSAULT_RIFLE, ITEM_HEAVY_RIFLE, ITEM_PLASMA_PISTOL, ITEM_LASER_PISTOL, ITEM_PISTOL
+    };
+    static const int gren_prio[] = {
+        ITEM_ALIEN_GRENADE, ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE
+    };
+    int i, k;
     int bonus_hp = has_facility(FAC_MEDBAY) ? 15 : 0;
     int bonus_tu = has_facility(FAC_ARCADE_REC) ? 6 : 0;
 
@@ -351,14 +372,6 @@ void campaign_sync_squad_units(void) {
         u->gender      = op->gender;
         u->portrait_id = op->portrait_id % NUM_PORTRAITS;
         u->sprite_id   = gfx_portrait_to_unit_sprite(u->portrait_id);
-        u->weapon_id   = wep;
-        u->sidearm_id  = op->sidearm_id;
-        u->ammo        = item_get_def(wep)->clip_size;
-        u->extra_clips = (op->extra_clips > 0) ? op->extra_clips : 2;
-        u->grenade_id  = (op->grenade_id >= 0 && campaign_is_item_researched(op->grenade_id))
-                         ? op->grenade_id : ITEM_FRAG_GRENADE;
-        u->grenades    = op->grenades;
-        u->flares      = op->flares;
         u->rank        = op->rank;
         u->xp_start    = op->xp;
         u->xp_gained   = 0;
@@ -367,12 +380,80 @@ void campaign_sync_squad_units(void) {
         u->tu          = u->tu_max;
         u->hp_max      = op->hp_max + bonus_hp;
         u->hp          = u->hp_max;
-        u->energy_max  = op->energy_max;
-        u->energy      = u->energy_max;
+        u->energy_max      = op->energy_max;
+        u->base_energy_max = op->energy_max;
+        u->energy          = u->energy_max;
         u->firing_acc  = op->firing_acc;
         u->throw_acc   = op->throw_acc;
         u->reactions   = op->reactions;
         u->morale      = 100;
+
+        if (g_camp.mode == 1) {
+            /* Active Mission Deployment: draw initial operative equipment from ARV Bus Cargo! */
+            int chosen_wep = ITEM_NONE;
+            u->active_hand = 0;
+            u->rhand_item  = ITEM_NONE;
+            u->rhand_ammo  = 0;
+            u->lhand_item  = ITEM_NONE;
+            u->lhand_ammo  = 0;
+            for (k = 0; k < INV_BELT_SMALL; k++)  u->belt_small[k] = ITEM_NONE;
+            for (k = 0; k < INV_BELT_LARGE; k++)  u->belt_large[k] = ITEM_NONE;
+            for (k = 0; k < INV_BACKPACK_SZ; k++) u->backpack[k]   = ITEM_NONE;
+            memset(u->slot_prime, -1, sizeof(u->slot_prime));
+
+            if (item_is_weapon(wep) && campaign_is_item_researched(wep) && take_arv_or_base_item(wep)) {
+                chosen_wep = wep;
+            } else {
+                for (k = 0; k < (int)(sizeof(wep_prio) / sizeof(wep_prio[0])); k++) {
+                    int cand = wep_prio[k];
+                    if (campaign_is_item_researched(cand) && take_arv_or_base_item(cand)) {
+                        chosen_wep = cand;
+                        break;
+                    }
+                }
+            }
+            if (chosen_wep >= 0) {
+                int ammo_id = item_get_def(chosen_wep)->ammo_item_id;
+                u->rhand_item = chosen_wep;
+                u->rhand_ammo = item_get_def(chosen_wep)->clip_size;
+                if (ammo_id >= 0 && campaign_is_item_researched(ammo_id)) {
+                    for (k = 0; k < 2; k++) {
+                        if (take_arv_or_base_item(ammo_id)) {
+                            if (!isomap_give_unit_item(u, ammo_id)) {
+                                return_unit_item_to_camp(ammo_id);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            for (k = 0; k < (int)(sizeof(gren_prio) / sizeof(gren_prio[0])); k++) {
+                int g_cand = gren_prio[k];
+                if (campaign_is_item_researched(g_cand) && take_arv_or_base_item(g_cand)) {
+                    if (!isomap_give_unit_item(u, g_cand)) {
+                        return_unit_item_to_camp(g_cand);
+                    }
+                    break;
+                }
+            }
+            if (take_arv_or_base_item(ITEM_FLARE)) {
+                if (!isomap_give_unit_item(u, ITEM_FLARE)) {
+                    return_unit_item_to_camp(ITEM_FLARE);
+                }
+            }
+            isomap_sync_unit_inventory(u);
+        } else {
+            /* Startup / Snapshot preview before mission launch: populate slots without depleting ARV cargo */
+            u->weapon_id   = wep;
+            u->sidearm_id  = op->sidearm_id;
+            u->ammo        = item_get_def(wep)->clip_size;
+            u->extra_clips = (op->extra_clips > 0) ? op->extra_clips : 2;
+            u->grenade_id  = (op->grenade_id >= 0 && campaign_is_item_researched(op->grenade_id))
+                             ? op->grenade_id : ITEM_FRAG_GRENADE;
+            u->grenades    = op->grenades;
+            u->flares      = op->flares;
+            isomap_init_unit_slots_from_summary(u);
+        }
     }
 }
 
@@ -397,22 +478,25 @@ void campaign_init(void) {
     g_camp.elerium     = 0;
     g_camp.alloys      = 10;
 
-    g_camp.stores[ITEM_PISTOL]        = 5;
-    g_camp.stores[ITEM_ASSAULT_RIFLE] = 6;
+    g_camp.stores[ITEM_PISTOL]        = 4;
+    g_camp.stores[ITEM_ASSAULT_RIFLE] = 4;
     g_camp.stores[ITEM_HEAVY_RIFLE]   = 2;
-    g_camp.stores[ITEM_PISTOL_CLIP]   = 10;
-    g_camp.stores[ITEM_RIFLE_MAG]     = 14;
+    g_camp.stores[ITEM_PISTOL_CLIP]   = 8;
+    g_camp.stores[ITEM_RIFLE_MAG]     = 12;
     g_camp.stores[ITEM_HEAVY_MAG]     = 6;
-    g_camp.stores[ITEM_FRAG_GRENADE]  = 10;
+    g_camp.stores[ITEM_FRAG_GRENADE]  = 8;
     g_camp.stores[ITEM_HEAVY_GRENADE] = 4;
     g_camp.stores[ITEM_FLARE]         = 8;
     g_camp.stores[ITEM_ALLOYS]        = 10;
 
-    g_camp.arv_cargo[ITEM_ASSAULT_RIFLE] = 5;
+    g_camp.arv_cargo[ITEM_ASSAULT_RIFLE] = 6;
     g_camp.arv_cargo[ITEM_PISTOL]        = 5;
-    g_camp.arv_cargo[ITEM_RIFLE_MAG]     = 10;
-    g_camp.arv_cargo[ITEM_PISTOL_CLIP]   = 5;
+    g_camp.arv_cargo[ITEM_HEAVY_RIFLE]   = 1;
+    g_camp.arv_cargo[ITEM_RIFLE_MAG]     = 14;
+    g_camp.arv_cargo[ITEM_PISTOL_CLIP]   = 6;
+    g_camp.arv_cargo[ITEM_HEAVY_MAG]     = 3;
     g_camp.arv_cargo[ITEM_FRAG_GRENADE]  = 8;
+    g_camp.arv_cargo[ITEM_HEAVY_GRENADE] = 2;
     g_camp.arv_cargo[ITEM_FLARE]         = 6;
 
     /* Initialize starting squad (Keller, Decker, Harr, Lucas, Barber) & replacement recruit pool */
@@ -657,15 +741,15 @@ static void launch_selected_mission(void) {
     isomap_start_mission(g_camp.selected_sector, g_camp.deploy_night);
 
     /* Apply Operative Ranks, Stats, Portraits, Armory Loadouts & Bunker Perks to Squad */
-    campaign_sync_squad_units();
     g_camp.mode = 1;
+    campaign_sync_squad_units();
 }
 
 static void show_alien_victory_gameover_screen(void);
 
 void campaign_on_mission_complete(void) {
 
-    int i;
+    int i, k;
     int kia_cnt = 0;
     int promo_cnt = 0;
     int focus_slot = -1;
@@ -698,6 +782,25 @@ void campaign_on_mission_complete(void) {
         } else {
             int surv_xp = 0;
             int gained;
+
+            /* Record surviving operative's preferred primary weapon and return all carried slot items to ARV / Base Stores */
+            if (u->rhand_item >= 0 && item_is_weapon(u->rhand_item) && campaign_is_item_researched(u->rhand_item)) {
+                op->weapon_id = u->rhand_item;
+            } else if (u->lhand_item >= 0 && item_is_weapon(u->lhand_item) && campaign_is_item_researched(u->lhand_item)) {
+                op->weapon_id = u->lhand_item;
+            }
+            if (u->rhand_item >= 0) { return_unit_item_to_camp(u->rhand_item); u->rhand_item = ITEM_NONE; }
+            if (u->lhand_item >= 0) { return_unit_item_to_camp(u->lhand_item); u->lhand_item = ITEM_NONE; }
+            for (k = 0; k < INV_BELT_SMALL; k++) {
+                if (u->belt_small[k] >= 0) { return_unit_item_to_camp(u->belt_small[k]); u->belt_small[k] = ITEM_NONE; }
+            }
+            for (k = 0; k < INV_BELT_LARGE; k++) {
+                if (u->belt_large[k] >= 0) { return_unit_item_to_camp(u->belt_large[k]); u->belt_large[k] = ITEM_NONE; }
+            }
+            for (k = 0; k < INV_BACKPACK_SZ; k++) {
+                if (u->backpack[k] >= 0) { return_unit_item_to_camp(u->backpack[k]); u->backpack[k] = ITEM_NONE; }
+            }
+
             op->kills += u->kills;
             if (u->throw_acc > op->throw_acc) {
                 op->throw_acc = u->throw_acc;
@@ -1574,21 +1677,20 @@ void campaign_handle_input(void) {
             return;
         }
     } else if (g_camp.active_tab == 2) {
-        if (g_input.last_key == KEY_UP) {
+        if (g_input.last_key == KEY_UP || g_input.last_key == KEY_LEFT) {
             g_camp.selected_soldier = (g_camp.selected_soldier + MAX_SQUAD_SIZE - 1) % MAX_SQUAD_SIZE;
             sfx_click();
         }
-        if (g_input.last_key == KEY_DOWN) {
+        if (g_input.last_key == KEY_DOWN || g_input.last_key == KEY_RIGHT) {
             g_camp.selected_soldier = (g_camp.selected_soldier + 1) % MAX_SQUAD_SIZE;
             sfx_click();
         }
         if (g_input.last_key == KEY_ENTER || g_input.last_key == ' ') {
-            int s = g_camp.selected_soldier % MAX_SQUAD_SIZE;
-            g_camp.squad[s].weapon_id = cycle_researched_weapon(g_camp.squad[s].weapon_id);
+            g_camp.armory_subtab = (g_camp.armory_subtab + 1) % 3;
+            g_camp.store_scroll  = 0;
             sfx_click();
             return;
         }
-
     }
 
     if (!g_input.left_clicked) return;

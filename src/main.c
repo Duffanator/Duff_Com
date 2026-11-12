@@ -71,6 +71,8 @@ int main(int argc, char **argv) {
             snap_mode = 1;
         } else if (strcmp(argv[i], "-snap-splash") == 0 || strcmp(argv[i], "--snap-splash") == 0) {
             snap_mode = 2;
+        } else if (strcmp(argv[i], "-snap-inv") == 0 || strcmp(argv[i], "--snap-inv") == 0) {
+            snap_mode = 3;
         }
     }
 
@@ -100,6 +102,13 @@ int main(int argc, char **argv) {
             isomap_draw_turn_splash();
             vga_flip();
             vga_save_bmp("SNAP_TRN.BMP");
+        } else if (snap_mode == 3) {
+            g_battle.pre_mission_equip = 1;
+            g_battle.inv_modal_open    = 1;
+            hud_render();
+            input_draw_cursor();
+            vga_flip();
+            vga_save_bmp("SNAP_INV.BMP");
         } else {
             g_battle.pre_mission_equip = 0;
             g_battle.inv_modal_open    = 0;
@@ -213,8 +222,8 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* Edge-of-screen scrolling with hover delay */
-        {
+        /* Edge-of-screen scrolling with hover delay (disabled while Full-Screen Inventory is open) */
+        if (!g_battle.inv_modal_open) {
             int edge_dir = 0;
             if (g_input.my < HUD_Y - 4) {
                 if (g_input.mx <= 3)            edge_dir |= 1;
@@ -239,6 +248,8 @@ int main(int argc, char **argv) {
             } else {
                 scroll_timer = 0;
             }
+        } else {
+            scroll_timer = 0;
         }
 
         if (g_input.my < HUD_Y && !g_battle.weapon_menu_open && !g_battle.inv_modal_open) {
@@ -250,8 +261,10 @@ int main(int argc, char **argv) {
         isomap_update_path_preview();
 
         if (g_battle.mission_ended == 0) {
-            if (g_input.left_clicked) {
-                if (g_battle.inv_modal_open || g_battle.weapon_menu_open || g_input.my >= HUD_Y) {
+            if (g_battle.inv_modal_open) {
+                hud_update_inventory();
+            } else if (g_input.left_clicked) {
+                if (g_battle.weapon_menu_open || g_input.my >= HUD_Y) {
                     hud_handle_click(g_input.mx, g_input.my, 0);
                 } else if (g_input.my >= HUD_Y - 15 && hud_handle_click(g_input.mx, g_input.my, 0)) {
                     /* Clicked a Bottom-Right Spotted Alien Head Indicator! */
@@ -261,12 +274,7 @@ int main(int argc, char **argv) {
                     isomap_move_or_interact(g_battle.cur_x, g_battle.cur_y);
                 }
             } else if (g_input.right_clicked) {
-                if (g_battle.inv_modal_open) {
-                    if (!g_battle.pre_mission_equip) {
-                        g_battle.inv_modal_open = 0;
-                        sfx_click();
-                    }
-                } else if (g_battle.weapon_menu_open) {
+                if (g_battle.weapon_menu_open) {
                     g_battle.weapon_menu_open = 0;
                     sfx_click();
                 } else if (g_input.my >= HUD_Y) {
@@ -303,7 +311,12 @@ int main(int argc, char **argv) {
             case 'i':
             case 'I':
                 g_battle.weapon_menu_open = 0;
-                g_battle.inv_modal_open   = !g_battle.inv_modal_open;
+                if (g_battle.inv_modal_open) {
+                    g_battle.pre_mission_equip = 0;
+                    g_battle.inv_modal_open    = 0;
+                } else {
+                    g_battle.inv_modal_open    = 1;
+                }
                 sfx_click();
                 break;
 
@@ -312,53 +325,81 @@ int main(int argc, char **argv) {
                 campaign_on_mission_complete();
                 sfx_click();
                 break;
-            case KEY_LEFT:  g_battle.cam_x += 12; break;
-            case KEY_RIGHT: g_battle.cam_x -= 12; break;
-            case KEY_UP:    g_battle.cam_y += 12; break;
-            case KEY_DOWN:  g_battle.cam_y -= 12; break;
+            case KEY_LEFT:
+                if (g_battle.inv_modal_open) isomap_select_prev_soldier();
+                else g_battle.cam_x += 12;
+                break;
+            case KEY_RIGHT:
+                if (g_battle.inv_modal_open) isomap_select_next_soldier();
+                else g_battle.cam_x -= 12;
+                break;
+            case KEY_UP:
+                if (g_battle.inv_modal_open) { hud_inv_scroll(-1); sfx_click(); }
+                else g_battle.cam_y += 12;
+                break;
+            case KEY_DOWN:
+                if (g_battle.inv_modal_open) { hud_inv_scroll(1); sfx_click(); }
+                else g_battle.cam_y -= 12;
+                break;
             case KEY_TAB:
             case ' ':
                 isomap_select_next_soldier();
                 break;
             case 'k':
             case 'K':
-                isomap_toggle_kneel();
+                if (!g_battle.inv_modal_open) isomap_toggle_kneel();
                 break;
             case 'r':
             case 'R':
-                g_battle.roof_cutaway = !g_battle.roof_cutaway;
-                sfx_click();
+                if (!g_battle.inv_modal_open) {
+                    g_battle.roof_cutaway = !g_battle.roof_cutaway;
+                    sfx_click();
+                }
                 break;
             case 'n':
             case 'N':
-                g_battle.night_mode = !g_battle.night_mode;
-                isomap_recalc_lighting_and_fov();
-                sfx_click();
+                if (!g_battle.inv_modal_open) {
+                    g_battle.night_mode = !g_battle.night_mode;
+                    isomap_recalc_lighting_and_fov();
+                    sfx_click();
+                }
                 break;
             case 'f':
             case 'F':
-                g_battle.weapon_menu_open = !g_battle.weapon_menu_open;
-                sfx_click();
+                if (!g_battle.inv_modal_open) {
+                    g_battle.weapon_menu_open = !g_battle.weapon_menu_open;
+                    sfx_click();
+                }
                 break;
             case '1':
             case '2':
             case '3':
             case '4':
             case '5':
-                g_battle.fire_mode = g_input.last_key - '0';
-                g_battle.weapon_menu_open = 0;
-                sfx_click();
+                if (!g_battle.inv_modal_open) {
+                    g_battle.fire_mode = g_input.last_key - '0';
+                    g_battle.weapon_menu_open = 0;
+                    sfx_click();
+                }
                 break;
             case KEY_PGUP:
             case 'u':
             case 'U':
-                if (g_battle.view_level < MAP_LEVS - 1) g_battle.view_level++;
+                if (g_battle.inv_modal_open) {
+                    hud_inv_scroll(-1);
+                } else if (g_battle.view_level < MAP_LEVS - 1) {
+                    g_battle.view_level++;
+                }
                 sfx_click();
                 break;
             case KEY_PGDN:
             case 'd':
             case 'D':
-                if (g_battle.view_level > 0) g_battle.view_level--;
+                if (g_battle.inv_modal_open) {
+                    hud_inv_scroll(1);
+                } else if (g_battle.view_level > 0) {
+                    g_battle.view_level--;
+                }
                 sfx_click();
                 break;
             case 'c':
@@ -369,7 +410,13 @@ int main(int argc, char **argv) {
             }
             case KEY_ENTER:
                 scroll_timer = 0;
-                isomap_end_turn();
+                if (g_battle.inv_modal_open) {
+                    g_battle.pre_mission_equip = 0;
+                    g_battle.inv_modal_open    = 0;
+                    sfx_click();
+                } else {
+                    isomap_end_turn();
+                }
                 break;
             case 'p':
             case 'P':
@@ -378,10 +425,14 @@ int main(int argc, char **argv) {
                 break;
         }
 
-        isomap_render();
+        if (!g_battle.inv_modal_open) {
+            isomap_render();
+        }
         hud_render();
         if (g_settings.menu_open) {
             settings_render_modal(1);
+            input_draw_cursor();
+        } else if (g_battle.inv_modal_open) {
             input_draw_cursor();
         } else {
             input_draw_cursor_ex(isomap_get_cursor_mode());

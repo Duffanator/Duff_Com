@@ -101,16 +101,344 @@ int isomap_unit_in_bus(const Unit *u) {
             u->y >= g_battle.bus_y0 && u->y <= g_battle.bus_y1);
 }
 
-void isomap_drop_ground_item(int x, int y, int z, int item_id) {
+void isomap_drop_ground_item_primed(int x, int y, int z, int item_id, int prime_turns) {
     int k;
     if (item_id < 0 || item_id >= ITEM_COUNT) return;
     if ((unsigned)x >= MAP_W || (unsigned)y >= MAP_H || (unsigned)z >= MAP_LEVS) return;
-    for (k = 0; k < 4; k++) {
+    for (k = 0; k < MAX_GND_ITEMS; k++) {
         if (g_map[z][y][x].gnd_item[k] < 0) {
-            g_map[z][y][x].gnd_item[k] = (int8_t)item_id;
+            g_map[z][y][x].gnd_item[k]  = (int8_t)item_id;
+            g_map[z][y][x].gnd_prime[k] = (item_is_grenade(item_id) && prime_turns >= 0)
+                                          ? (int8_t)prime_turns : -1;
             return;
         }
     }
+}
+
+void isomap_drop_ground_item(int x, int y, int z, int item_id) {
+    isomap_drop_ground_item_primed(x, y, z, item_id, -1);
+}
+
+int isomap_unit_two_hand_penalty_pct(const Unit *u) {
+    if (!u || u->faction != FACTION_DUFFCOM) return 100;
+    if (u->rhand_item >= 0 && u->lhand_item >= 0) {
+        int wep = u->weapon_id;
+        if (!item_is_weapon(wep)) {
+            wep = item_is_weapon(u->rhand_item) ? u->rhand_item : u->lhand_item;
+        }
+        if (item_is_weapon(wep) && item_get_def(wep)->store_space >= 2) {
+            return 75; /* -25% accuracy when firing a 2-handed rifle/cannon with offhand occupied */
+        }
+        return 85;     /* -15% accuracy when firing a 1-handed pistol with offhand occupied */
+    }
+    return 100;
+}
+
+int isomap_unit_carried_weight(const Unit *u) {
+    int i, total = 0;
+    if (!u) return 0;
+    if (u->rhand_item >= 0 && u->rhand_item < ITEM_COUNT) total += item_get_def(u->rhand_item)->weight;
+    if (u->lhand_item >= 0 && u->lhand_item < ITEM_COUNT) total += item_get_def(u->lhand_item)->weight;
+    for (i = 0; i < INV_BELT_SMALL; i++) {
+        int id = u->belt_small[i];
+        if (id >= 0 && id < ITEM_COUNT) total += item_get_def(id)->weight;
+    }
+    for (i = 0; i < INV_BELT_LARGE; i++) {
+        int id = u->belt_large[i];
+        if (id >= 0 && id < ITEM_COUNT) total += item_get_def(id)->weight;
+    }
+    for (i = 0; i < INV_BACKPACK_SZ; i++) {
+        int id = u->backpack[i];
+        if (id >= 0 && id < ITEM_COUNT) total += item_get_def(id)->weight;
+    }
+    return total;
+}
+
+int isomap_unit_move_tu_pct(const Unit *u) {
+    int wt, pct = 100;
+    if (!u || u->faction != FACTION_DUFFCOM) return 100;
+    wt = isomap_unit_carried_weight(u);
+    if (wt > 10) {
+        pct += (wt - 10) * 4;
+    }
+    if (u->energy <= 0) {
+        pct += 40;
+    } else if (u->energy <= 12) {
+        pct += 20;
+    }
+    return pct;
+}
+
+static void apply_unit_weight_to_path(const Unit *u, PathResult *path) {
+    int i, pct;
+    uint16_t accum = 0;
+    if (!u || !path || !path->valid || path->length <= 0) return;
+    pct = isomap_unit_move_tu_pct(u);
+    if (pct == 100) return;
+    for (i = 0; i < path->length; i++) {
+        int base_c = (int)path->steps[i].tu_cost;
+        int scaled = (base_c * pct + 50) / 100;
+        if (scaled < 1) scaled = 1;
+        if (scaled > 250) scaled = 250;
+        path->steps[i].tu_cost = (uint8_t)scaled;
+        accum = (uint16_t)(accum + scaled);
+        path->steps[i].total_tu = accum;
+    }
+}
+
+void isomap_sync_unit_inventory(Unit *u) {
+    int i, req_ammo = ITEM_NONE;
+    if (!u) return;
+
+    if (u->active_hand == 1 && item_is_weapon(u->lhand_item)) {
+        u->weapon_id = u->lhand_item;
+        u->ammo      = u->lhand_ammo;
+        if (item_is_weapon(u->rhand_item))         u->sidearm_id = u->rhand_item;
+        else if (item_is_weapon(u->belt_large[0])) u->sidearm_id = u->belt_large[0];
+        else if (item_is_weapon(u->belt_large[1])) u->sidearm_id = u->belt_large[1];
+        else                                       u->sidearm_id = ITEM_NONE;
+    } else if (item_is_weapon(u->rhand_item)) {
+        u->weapon_id = u->rhand_item;
+        u->ammo      = u->rhand_ammo;
+        if (item_is_weapon(u->lhand_item))         u->sidearm_id = u->lhand_item;
+        else if (item_is_weapon(u->belt_large[0])) u->sidearm_id = u->belt_large[0];
+        else if (item_is_weapon(u->belt_large[1])) u->sidearm_id = u->belt_large[1];
+        else                                       u->sidearm_id = ITEM_NONE;
+    } else if (item_is_weapon(u->lhand_item)) {
+        u->weapon_id = u->lhand_item;
+        u->ammo      = u->lhand_ammo;
+        if (item_is_weapon(u->belt_large[0]))      u->sidearm_id = u->belt_large[0];
+        else if (item_is_weapon(u->belt_large[1])) u->sidearm_id = u->belt_large[1];
+        else                                       u->sidearm_id = ITEM_NONE;
+    } else {
+        u->weapon_id = ITEM_NONE;
+        u->ammo      = 0;
+        if (item_is_weapon(u->belt_large[0]))      u->sidearm_id = u->belt_large[0];
+        else if (item_is_weapon(u->belt_large[1])) u->sidearm_id = u->belt_large[1];
+        else                                       u->sidearm_id = ITEM_NONE;
+    }
+
+    if (item_is_weapon(u->weapon_id)) {
+        req_ammo = item_get_def(u->weapon_id)->ammo_item_id;
+    }
+
+    u->extra_clips = 0;
+    u->grenades    = 0;
+    u->grenade_id  = ITEM_FRAG_GRENADE;
+    u->flares      = 0;
+    {
+        int found_gren = 0;
+        int slots[2 + INV_BELT_SMALL + INV_BELT_LARGE + INV_BACKPACK_SZ];
+        int n = 0;
+        slots[n++] = u->rhand_item;
+        slots[n++] = u->lhand_item;
+        for (i = 0; i < INV_BELT_SMALL; i++)  slots[n++] = u->belt_small[i];
+        for (i = 0; i < INV_BELT_LARGE; i++)  slots[n++] = u->belt_large[i];
+        for (i = 0; i < INV_BACKPACK_SZ; i++) slots[n++] = u->backpack[i];
+
+        for (i = 0; i < n; i++) {
+            int id = slots[i];
+            if (id < 0 || id >= ITEM_COUNT || !item_is_grenade(id)) {
+                u->slot_prime[i] = -1;
+            }
+            if (id < 0 || id >= ITEM_COUNT) continue;
+            if (req_ammo >= 0 && id == req_ammo) {
+                u->extra_clips++;
+            } else if (item_is_grenade(id)) {
+                u->grenades++;
+                if (!found_gren || (u->active_hand == 1 && i == 1) || (u->active_hand == 0 && i == 0)) {
+                    u->grenade_id = id;
+                    found_gren = 1;
+                }
+            } else if (id == ITEM_FLARE) {
+                u->flares++;
+            }
+        }
+    }
+
+    /* Update operative effective Stamina (energy_max / energy) based on total equipped gear weight */
+    if (u->faction == FACTION_DUFFCOM) {
+        int wt = isomap_unit_carried_weight(u);
+        int base_en = (u->base_energy_max > 0) ? u->base_energy_max : u->energy_max;
+        int pen = (wt > 10) ? ((wt - 10) * 3) / 2 : 0;
+        int new_max = base_en - pen;
+        int was_full = (u->energy >= u->energy_max);
+        if (u->base_energy_max <= 0) u->base_energy_max = base_en;
+        if (new_max < 16) new_max = 16;
+        u->energy_max = new_max;
+        if (g_battle.pre_mission_equip || was_full || u->energy > u->energy_max) {
+            u->energy = u->energy_max;
+        }
+    }
+    invalidate_path_preview();
+}
+
+int isomap_give_unit_item(Unit *u, int item_id) {
+    int i;
+    if (!u || item_id < 0 || item_id >= ITEM_COUNT) return 0;
+
+    if (item_is_weapon(item_id)) {
+        int clip = item_get_def(item_id)->clip_size;
+        if (u->rhand_item < 0) {
+            u->rhand_item = item_id;
+            u->rhand_ammo = clip;
+            isomap_sync_unit_inventory(u);
+            return 1;
+        }
+        if (u->lhand_item < 0) {
+            u->lhand_item = item_id;
+            u->lhand_ammo = clip;
+            isomap_sync_unit_inventory(u);
+            return 1;
+        }
+        if (item_fits_large_belt(item_id)) {
+            for (i = 0; i < INV_BELT_LARGE; i++) {
+                if (u->belt_large[i] < 0) {
+                    u->belt_large[i] = item_id;
+                    isomap_sync_unit_inventory(u);
+                    return 1;
+                }
+            }
+        }
+        for (i = 0; i < INV_BACKPACK_SZ; i++) {
+            if (u->backpack[i] < 0) {
+                u->backpack[i] = item_id;
+                isomap_sync_unit_inventory(u);
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    if (item_fits_small_belt(item_id)) {
+        for (i = 0; i < INV_BELT_SMALL; i++) {
+            if (u->belt_small[i] < 0) {
+                u->belt_small[i] = item_id;
+                isomap_sync_unit_inventory(u);
+                return 1;
+            }
+        }
+    }
+    if (item_fits_large_belt(item_id)) {
+        for (i = 0; i < INV_BELT_LARGE; i++) {
+            if (u->belt_large[i] < 0) {
+                u->belt_large[i] = item_id;
+                isomap_sync_unit_inventory(u);
+                return 1;
+            }
+        }
+    }
+    for (i = 0; i < INV_BACKPACK_SZ; i++) {
+        if (u->backpack[i] < 0) {
+            u->backpack[i] = item_id;
+            isomap_sync_unit_inventory(u);
+            return 1;
+        }
+    }
+    if (item_fits_hand(item_id)) {
+        if (u->lhand_item < 0) {
+            u->lhand_item = item_id;
+            u->lhand_ammo = 0;
+            isomap_sync_unit_inventory(u);
+            return 1;
+        }
+        if (u->rhand_item < 0) {
+            u->rhand_item = item_id;
+            u->rhand_ammo = 0;
+            isomap_sync_unit_inventory(u);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int isomap_consume_unit_item(Unit *u, int item_id) {
+    int i;
+    if (!u || item_id < 0 || item_id >= ITEM_COUNT) return 0;
+
+    for (i = 0; i < INV_BELT_SMALL; i++) {
+        if (u->belt_small[i] == item_id) {
+            u->belt_small[i] = ITEM_NONE;
+            isomap_sync_unit_inventory(u);
+            return 1;
+        }
+    }
+    for (i = 0; i < INV_BELT_LARGE; i++) {
+        if (u->belt_large[i] == item_id) {
+            u->belt_large[i] = ITEM_NONE;
+            isomap_sync_unit_inventory(u);
+            return 1;
+        }
+    }
+    if (u->lhand_item == item_id) {
+        u->lhand_item = ITEM_NONE;
+        u->lhand_ammo = 0;
+        isomap_sync_unit_inventory(u);
+        return 1;
+    }
+    if (u->rhand_item == item_id) {
+        u->rhand_item = ITEM_NONE;
+        u->rhand_ammo = 0;
+        isomap_sync_unit_inventory(u);
+        return 1;
+    }
+    for (i = 0; i < INV_BACKPACK_SZ; i++) {
+        if (u->backpack[i] == item_id) {
+            u->backpack[i] = ITEM_NONE;
+            isomap_sync_unit_inventory(u);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void isomap_init_unit_slots_from_summary(Unit *u) {
+    int i;
+    int wep, side, clips, gren_id, grens, flares;
+    if (!u) return;
+
+    wep     = u->weapon_id;
+    side    = u->sidearm_id;
+    clips   = u->extra_clips;
+    gren_id = (u->grenade_id >= 0) ? u->grenade_id : ITEM_FRAG_GRENADE;
+    grens   = u->grenades;
+    flares  = u->flares;
+
+    u->active_hand = 0;
+    u->rhand_item  = ITEM_NONE;
+    u->rhand_ammo  = 0;
+    u->lhand_item  = ITEM_NONE;
+    u->lhand_ammo  = 0;
+    for (i = 0; i < INV_BELT_SMALL; i++)  u->belt_small[i] = ITEM_NONE;
+    for (i = 0; i < INV_BELT_LARGE; i++)  u->belt_large[i] = ITEM_NONE;
+    for (i = 0; i < INV_BACKPACK_SZ; i++) u->backpack[i]   = ITEM_NONE;
+    memset(u->slot_prime, -1, sizeof(u->slot_prime));
+
+    if (item_is_weapon(wep)) {
+        u->rhand_item = wep;
+        u->rhand_ammo = (u->ammo > 0) ? u->ammo : item_get_def(wep)->clip_size;
+    }
+    if (item_is_weapon(side) && side != wep) {
+        if (item_fits_large_belt(side)) {
+            u->belt_large[0] = side;
+        } else {
+            u->lhand_item = side;
+            u->lhand_ammo = item_get_def(side)->clip_size;
+        }
+    }
+    if (item_is_weapon(wep)) {
+        int ammo_id = item_get_def(wep)->ammo_item_id;
+        for (i = 0; i < clips && ammo_id >= 0; i++) {
+            isomap_give_unit_item(u, ammo_id);
+        }
+    }
+    for (i = 0; i < grens && item_is_grenade(gren_id); i++) {
+        isomap_give_unit_item(u, gren_id);
+    }
+    for (i = 0; i < flares; i++) {
+        isomap_give_unit_item(u, ITEM_FLARE);
+    }
+    isomap_sync_unit_inventory(u);
 }
 
 static int calc_mission_score(int squad_alive) {
@@ -156,7 +484,7 @@ static void check_victory_state(void) {
                     if (g_map[z][y][x].wall_north == WALL_UFO_HULL) hull_cnt++;
 
                     /* Collect all persistent items laying on the ground back to Base Stores! */
-                    for (k = 0; k < 4; k++) {
+                    for (k = 0; k < MAX_GND_ITEMS; k++) {
                         int gid = g_map[z][y][x].gnd_item[k];
                         if (gid >= 0 && gid < ITEM_COUNT) {
                             g_camp.stores[gid]++;
@@ -261,8 +589,9 @@ static void spawn_unit(int idx, int faction, int type, const char *name,
         u->grenades    = 2;
         u->flares      = 2;
     } else if (faction == FACTION_CIVILIAN) {
-        u->gender      = portrait_id ? 1 : 0;
-        u->sprite_id   = u->gender ? UNIT_SPR_CIV_FEM : UNIT_SPR_CIV_MALE;
+        int civ_var    = portrait_id % 6;
+        u->gender      = (civ_var >= 3) ? 1 : 0;
+        u->sprite_id   = UNIT_SPR_CIV_MALE + civ_var;
         u->weapon_id   = ITEM_NONE;
         u->sidearm_id  = ITEM_NONE;
         u->ammo        = 0;
@@ -293,6 +622,7 @@ static void spawn_unit(int idx, int faction, int type, const char *name,
                 (faction == FACTION_CIVILIAN ? 26 : (type == 3 ? 65 : (type == 2 ? 45 : 32)));
     u->hp = u->hp_max;
     u->energy_max = (faction == FACTION_DUFFCOM) ? 56 : (faction == FACTION_CIVILIAN ? 48 : 60);
+    u->base_energy_max = u->energy_max;
     u->energy = u->energy_max;
     u->morale = 100;
     u->firing_acc = (faction == FACTION_DUFFCOM) ? 57 :
@@ -301,6 +631,7 @@ static void spawn_unit(int idx, int faction, int type, const char *name,
                     (faction == FACTION_CIVILIAN ? 0 : (type == 3 ? 62 : 50));
     u->reactions  = (faction == FACTION_DUFFCOM) ? 46 :
                     (faction == FACTION_CIVILIAN ? 15 : (type == 3 ? 55 : 42));
+    isomap_init_unit_slots_from_summary(u);
     g_map[z][y][x].unit_idx = (int8_t)idx;
 
 }
@@ -783,6 +1114,7 @@ void isomap_update_path_preview(void) {
     pathfind_compute(u->x, u->y, u->z,
                      g_battle.cur_x, g_battle.cur_y, g_battle.view_level,
                      u->unit_type == 2, &g_preview_path);
+    apply_unit_weight_to_path(u, &g_preview_path);
 }
 
 void isomap_start_mission(int biome_id, int night_mode) {
@@ -868,6 +1200,27 @@ void isomap_select_next_soldier(void) {
     if (g_battle.walking_active) return;
     for (i = 1; i <= MAX_UNITS; i++) {
         int idx = (start + i) % MAX_UNITS;
+        if (g_units[idx].active && g_units[idx].faction == 0) {
+            g_battle.selected_unit = idx;
+            g_battle.view_level = g_units[idx].z;
+            g_battle.cur_x = g_units[idx].x;
+            g_battle.cur_y = g_units[idx].y;
+            g_battle.fire_mode = 0;
+            g_battle.weapon_menu_open = 0;
+            invalidate_path_preview();
+            isomap_center_camera_on(g_units[idx].x, g_units[idx].y, g_units[idx].z);
+            set_soldier_status(&g_units[idx]);
+            sfx_click();
+            return;
+        }
+    }
+}
+
+void isomap_select_prev_soldier(void) {
+    int i, start = g_battle.selected_unit;
+    if (g_battle.walking_active) return;
+    for (i = 1; i <= MAX_UNITS; i++) {
+        int idx = (start + MAX_UNITS - i) % MAX_UNITS;
         if (g_units[idx].active && g_units[idx].faction == 0) {
             g_battle.selected_unit = idx;
             g_battle.view_level = g_units[idx].z;
@@ -1092,7 +1445,12 @@ void isomap_update_walk(void) {
         u->y = st->y;
         u->z = st->z;
         u->tu -= st->tu_cost;
-        if (u->energy >= 2) u->energy -= 2;
+        {
+            int wt = isomap_unit_carried_weight(u);
+            int stm_drain = 1 + (wt + 4) / 6;
+            u->energy -= stm_drain;
+            if (u->energy < 0) u->energy = 0;
+        }
         u->pixel_off_x = 0;
         u->pixel_off_y = 0;
         g_map[u->z][u->y][u->x].unit_idx = (int8_t)g_battle.selected_unit;
@@ -1182,6 +1540,7 @@ void isomap_move_or_interact(int tx, int ty) {
 
     if (pathfind_compute(u->x, u->y, u->z, tx, ty, g_battle.view_level,
                          u->unit_type == 2, &g_walk_path) && g_walk_path.length > 0) {
+        apply_unit_weight_to_path(u, &g_walk_path);
         g_battle.walking_active = 1;
         g_battle.walk_step_idx = 0;
         g_battle.walk_subframe = 0;
@@ -1191,11 +1550,15 @@ void isomap_move_or_interact(int tx, int ty) {
     }
 }
 
+static void detonate_explosion(int cx, int cy, int cz, int attacker_idx);
+
 /* Play agonized death scream, 4-stage collapse animation, and leave persistent corpse in place! */
 static void kill_unit(int victim_idx, int killer_idx) {
     Unit *v;
     char msg[48];
     int visible, stage;
+    int detonate_zero_grenade = 0;
+    int vx, vy, vz;
 
     if (victim_idx < 0 || victim_idx >= MAX_UNITS || !g_units[victim_idx].active) return;
     combat_anim_depth++;
@@ -1294,17 +1657,103 @@ static void kill_unit(int victim_idx, int killer_idx) {
     v->active     = 0;
     v->death_anim = 0;
     v->is_corpse  = 1;
+    vx = v->x;
+    vy = v->y;
+    vz = v->z;
 
-    /* Drop fallen unit's weapon, spare magazine/cartridge & grenade onto the ground tile! */
-    if (item_is_weapon(v->weapon_id)) {
-        int a_id = item_get_def(v->weapon_id)->ammo_item_id;
-        isomap_drop_ground_item(v->x, v->y, v->z, v->weapon_id);
-        if (item_is_ammo(a_id) && (v->extra_clips > 0 || v->ammo > 0)) {
-            isomap_drop_ground_item(v->x, v->y, v->z, a_id);
+    /* Drop fallen unit's carried inventory onto the ground tile!
+     * Any grenade primed for 0 turns explodes immediately on death;
+     * any grenade primed for 1..6 turns drops onto the tile with its remaining fuse! */
+    if (v->faction == FACTION_DUFFCOM) {
+        int si;
+        if (v->rhand_item >= 0) {
+            int id = v->rhand_item;
+            int pr = v->slot_prime[0];
+            if (item_is_grenade(id) && pr == 0) {
+                detonate_zero_grenade = 1;
+            } else {
+                int a_id = item_is_weapon(id) ? item_get_def(id)->ammo_item_id : ITEM_NONE;
+                isomap_drop_ground_item_primed(vx, vy, vz, id, pr);
+                if (item_is_ammo(a_id) && v->rhand_ammo > 0) {
+                    isomap_drop_ground_item(vx, vy, vz, a_id);
+                }
+            }
+            v->rhand_item    = ITEM_NONE;
+            v->rhand_ammo    = 0;
+            v->slot_prime[0] = -1;
+        }
+        if (v->lhand_item >= 0) {
+            int id = v->lhand_item;
+            int pr = v->slot_prime[1];
+            if (item_is_grenade(id) && pr == 0) {
+                detonate_zero_grenade = 1;
+            } else {
+                int a_id = item_is_weapon(id) ? item_get_def(id)->ammo_item_id : ITEM_NONE;
+                isomap_drop_ground_item_primed(vx, vy, vz, id, pr);
+                if (item_is_ammo(a_id) && v->lhand_ammo > 0) {
+                    isomap_drop_ground_item(vx, vy, vz, a_id);
+                }
+            }
+            v->lhand_item    = ITEM_NONE;
+            v->lhand_ammo    = 0;
+            v->slot_prime[1] = -1;
+        }
+        for (si = 0; si < INV_BELT_SMALL; si++) {
+            int id = v->belt_small[si];
+            int pr = v->slot_prime[2 + si];
+            if (id >= 0) {
+                if (item_is_grenade(id) && pr == 0) {
+                    detonate_zero_grenade = 1;
+                } else {
+                    isomap_drop_ground_item_primed(vx, vy, vz, id, pr);
+                }
+                v->belt_small[si]     = ITEM_NONE;
+                v->slot_prime[2 + si] = -1;
+            }
+        }
+        for (si = 0; si < INV_BELT_LARGE; si++) {
+            int id = v->belt_large[si];
+            int pr = v->slot_prime[6 + si];
+            if (id >= 0) {
+                if (item_is_grenade(id) && pr == 0) {
+                    detonate_zero_grenade = 1;
+                } else {
+                    isomap_drop_ground_item_primed(vx, vy, vz, id, pr);
+                }
+                v->belt_large[si]     = ITEM_NONE;
+                v->slot_prime[6 + si] = -1;
+            }
+        }
+        for (si = 0; si < INV_BACKPACK_SZ; si++) {
+            int id = v->backpack[si];
+            int pr = v->slot_prime[8 + si];
+            if (id >= 0) {
+                if (item_is_grenade(id) && pr == 0) {
+                    detonate_zero_grenade = 1;
+                } else {
+                    isomap_drop_ground_item_primed(vx, vy, vz, id, pr);
+                }
+                v->backpack[si]       = ITEM_NONE;
+                v->slot_prime[8 + si] = -1;
+            }
+        }
+        isomap_sync_unit_inventory(v);
+    } else {
+        if (item_is_weapon(v->weapon_id)) {
+            int a_id = item_get_def(v->weapon_id)->ammo_item_id;
+            isomap_drop_ground_item(vx, vy, vz, v->weapon_id);
+            if (item_is_ammo(a_id) && (v->extra_clips > 0 || v->ammo > 0)) {
+                isomap_drop_ground_item(vx, vy, vz, a_id);
+            }
+        }
+        if (v->grenades > 0 && item_is_grenade(v->grenade_id)) {
+            isomap_drop_ground_item(vx, vy, vz, v->grenade_id);
         }
     }
-    if (v->grenades > 0 && item_is_grenade(v->grenade_id)) {
-        isomap_drop_ground_item(v->x, v->y, v->z, v->grenade_id);
+
+    if (detonate_zero_grenade) {
+        set_status("PRIMED 0-TURN GRENADE DETONATED ON DEATH!");
+        detonate_explosion(vx, vy, vz, victim_idx);
     }
 
 
@@ -2052,6 +2501,7 @@ int isomap_calc_shot_acc(const Unit *u, int mode, int dist) {
     if (u->stance) {
         acc = (acc * 115) / 100; /* +15% accuracy bonus when kneeling */
     }
+    acc = (acc * isomap_unit_two_hand_penalty_pct(u)) / 100; /* Two-hand penalty if offhand occupied */
 
     if (acc < 8)  acc = 8;
     if (acc > 96) acc = 96;
@@ -2089,7 +2539,9 @@ void isomap_fire_weapon(int tx, int ty) {
         }
         isomap_turn_unit_toward(u, tx, ty);
         u->tu -= tu_cost;
-        u->flares--;
+        if (!isomap_consume_unit_item(u, ITEM_FLARE) && u->flares > 0) {
+            u->flares--;
+        }
         g_battle.fire_mode = 0;
         combat_anim_depth++;
 
@@ -2189,38 +2641,73 @@ void isomap_fire_weapon(int tx, int ty) {
         }
         {
             int tidx = g_map[g_battle.view_level][land_y][land_x].unit_idx;
-            if (tidx >= 0 && g_units[tidx].active && g_units[tidx].faction == 0 && item_is_ammo(thrown_id)) {
-                g_units[tidx].extra_clips++;
+            if (tidx >= 0 && g_units[tidx].active && g_units[tidx].faction == 0 &&
+                item_is_ammo(thrown_id) && isomap_give_unit_item(&g_units[tidx], thrown_id)) {
                 set_status("OPERATIVE CAUGHT AMMO CLIP! (+XP)");
             } else {
-                isomap_drop_ground_item(land_x, land_y, g_battle.view_level, thrown_id);
+                isomap_drop_ground_item_primed(land_x, land_y, g_battle.view_level,
+                                               thrown_id, g_battle.throw_prime);
                 set_status((land_x == tx && land_y == ty) ? "ITEM THROWN TO TILE! (+XP)"
                                                           : "WILD THROW! ITEM SCATTERED!");
             }
+            g_battle.throw_prime = -1;
         }
         sfx_click();
         combat_anim_depth--;
         return;
     }
 
-    /* Mode 4: Throw High-Explosive Grenade with spinning pineapple sprite & throw_acc check! */
+    /* Mode 4: Throw Primed High-Explosive Grenade from Right or Left Hand! */
     if (mode == 4) {
         int sx0, sy0, sx1, sy1, step;
         int roll = rand() % 100;
         int land_x = tx, land_y = ty;
-        if (u->grenades <= 0) {
-            set_status("NO HE GRENADES REMAINING!");
+        int hand_slot = -1;
+        int thrown_gren_id = ITEM_FRAG_GRENADE;
+        int prime_turns = -1;
+
+        if (g_battle.throw_hand_slot == 1 && item_is_grenade(u->lhand_item) && u->slot_prime[1] >= 0) {
+            hand_slot = 1;
+        } else if (g_battle.throw_hand_slot == 0 && item_is_grenade(u->rhand_item) && u->slot_prime[0] >= 0) {
+            hand_slot = 0;
+        } else if (u->active_hand == 1 && item_is_grenade(u->lhand_item) && u->slot_prime[1] >= 0) {
+            hand_slot = 1;
+        } else if (item_is_grenade(u->rhand_item) && u->slot_prime[0] >= 0) {
+            hand_slot = 0;
+        } else if (item_is_grenade(u->lhand_item) && u->slot_prime[1] >= 0) {
+            hand_slot = 1;
+        } else {
+            g_battle.fire_mode = 0;
+            if (item_is_grenade(u->rhand_item) || item_is_grenade(u->lhand_item)) {
+                set_status("PRIME GRENADE FUSE (0-6) BEFORE THROWING!");
+            } else {
+                set_status("EQUIP PRIMED GRENADE IN HAND TO THROW!");
+            }
             sfx_beep(200, 60);
             return;
         }
+
         if (abs(tx - u->x) + abs(ty - u->y) > 10) {
             set_status("TARGET OUT OF THROW RANGE!");
             sfx_beep(200, 60);
             return;
         }
+
+        thrown_gren_id = (hand_slot == 1) ? u->lhand_item : u->rhand_item;
+        prime_turns    = u->slot_prime[hand_slot];
+
         isomap_turn_unit_toward(u, tx, ty);
         u->tu -= tu_cost;
-        u->grenades--;
+        if (hand_slot == 1) {
+            u->lhand_item    = ITEM_NONE;
+            u->lhand_ammo    = 0;
+            u->slot_prime[1] = -1;
+        } else {
+            u->rhand_item    = ITEM_NONE;
+            u->rhand_ammo    = 0;
+            u->slot_prime[0] = -1;
+        }
+        isomap_sync_unit_inventory(u);
         g_battle.fire_mode = 0;
 
         if (roll < u->throw_acc) {
@@ -2254,8 +2741,22 @@ void isomap_fire_weapon(int tx, int ty) {
                 vga_flip();
                 game_wait_frames(settings_grenade_step_frames());
             }
+            sx1 = g_battle.cam_x + wx1;
+            sy1 = g_battle.cam_y + wy1;
         }
-        detonate_explosion(land_x, land_y, g_battle.view_level, g_battle.selected_unit);
+        if (prime_turns <= 0) {
+            /* Primed at 0 turns: explodes immediately upon landing! */
+            detonate_explosion(land_x, land_y, g_battle.view_level, g_battle.selected_unit);
+        } else {
+            /* Primed at 1..6 turns: lands on ground and counts down each turn! */
+            char fmsg[48];
+            isomap_drop_ground_item_primed(land_x, land_y, g_battle.view_level,
+                                           thrown_gren_id, prime_turns);
+            snprintf(fmsg, sizeof(fmsg), "PRIMED GRENADE LANDED (%d TRN FUSE)!", prime_turns);
+            set_status(fmsg);
+            sfx_click();
+            play_impact_splash(SPLASH_BULLET, sx1 + 16, sy1 + 6);
+        }
         isomap_recalc_lighting_and_fov();
         invalidate_path_preview();
         combat_anim_depth--;
@@ -2269,10 +2770,24 @@ void isomap_fire_weapon(int tx, int ty) {
         return;
     }
 
+    if (!item_is_weapon((u->active_hand == 1) ? u->lhand_item : u->rhand_item) ||
+        !item_is_weapon(u->weapon_id)) {
+        g_battle.fire_mode = 0;
+        set_status("NO WEAPON IN ACTIVE HAND!");
+        sfx_beep(200, 60);
+        return;
+    }
+
     if (u->ammo <= 0) {
+        int ammo_id = item_get_def(u->weapon_id)->ammo_item_id;
         if (u->extra_clips > 0) {
-            u->extra_clips--;
+            if (!isomap_consume_unit_item(u, ammo_id)) {
+                u->extra_clips--;
+            }
             u->ammo = item_get_def(u->weapon_id)->clip_size;
+            if (u->active_hand == 1 && u->lhand_item == u->weapon_id) u->lhand_ammo = u->ammo;
+            else if (u->rhand_item == u->weapon_id)                   u->rhand_ammo = u->ammo;
+            else if (u->lhand_item == u->weapon_id)                   u->lhand_ammo = u->ammo;
         } else {
             set_status("OUT OF AMMO! NO MAGAZINES LEFT!");
             sfx_beep(200, 60);
@@ -2288,10 +2803,16 @@ void isomap_fire_weapon(int tx, int ty) {
     for (s = 0; s < shots && u->active; s++) {
         int dist = abs(tx - u->x) + abs(ty - u->y);
         int acc;
+        int ammo_id = item_get_def(u->weapon_id)->ammo_item_id;
         if (u->ammo <= 0) {
             if (u->extra_clips > 0) {
-                u->extra_clips--;
+                if (!isomap_consume_unit_item(u, ammo_id)) {
+                    u->extra_clips--;
+                }
                 u->ammo = item_get_def(u->weapon_id)->clip_size;
+                if (u->active_hand == 1 && u->lhand_item == u->weapon_id) u->lhand_ammo = u->ammo;
+                else if (u->rhand_item == u->weapon_id)                   u->rhand_ammo = u->ammo;
+                else if (u->lhand_item == u->weapon_id)                   u->lhand_ammo = u->ammo;
                 set_status("RELOADED FRESH MAGAZINE!");
             } else {
                 set_status("CLICK! MAGAZINE EMPTY!");
@@ -2299,12 +2820,19 @@ void isomap_fire_weapon(int tx, int ty) {
             }
         }
         u->ammo--;
+        if (u->active_hand == 1 && u->lhand_item == u->weapon_id) u->lhand_ammo = u->ammo;
+        else if (u->rhand_item == u->weapon_id)                   u->rhand_ammo = u->ammo;
+        else if (u->lhand_item == u->weapon_id)                   u->lhand_ammo = u->ammo;
         acc = isomap_calc_shot_acc(u, mode, dist);
         execute_raycast_shot(g_battle.selected_unit, tx, ty, g_battle.view_level, acc);
 
         if (u->ammo == 0 && u->extra_clips > 0) {
-            u->extra_clips--;
+            if (!isomap_consume_unit_item(u, ammo_id)) {
+                u->extra_clips--;
+            }
             u->ammo = item_get_def(u->weapon_id)->clip_size;
+            if (u->rhand_item == u->weapon_id)      u->rhand_ammo = u->ammo;
+            else if (u->lhand_item == u->weapon_id) u->lhand_ammo = u->ammo;
             set_status("AUTO-RELOADED MAGAZINE!");
         }
         if (s + 1 < shots && u->active) game_wait_frames(settings_burst_gap_frames());
@@ -3216,6 +3744,50 @@ void isomap_end_turn(void) {
                 }
             }
         }
+
+        /* 3b. Tick down Primed Timed Grenades on the ground and detonate any whose fuse reaches 0! */
+        {
+            int det_x[16], det_y[16], det_z[16], n_det = 0, gk;
+            for (z = 0; z < MAP_LEVS; z++) {
+                for (y = 0; y < MAP_H; y++) {
+                    for (x = 0; x < MAP_W; x++) {
+                        MapCell *c = &g_map[z][y][x];
+                        for (gk = 0; gk < MAX_GND_ITEMS; gk++) {
+                            int gid = c->gnd_item[gk];
+                            if (gid >= 0 && item_is_grenade(gid) && c->gnd_prime[gk] >= 0) {
+                                c->gnd_prime[gk]--;
+                                if (c->gnd_prime[gk] <= 0) {
+                                    c->gnd_item[gk]  = -1;
+                                    c->gnd_prime[gk] = -1;
+                                    if (n_det < 16) {
+                                        det_x[n_det] = x;
+                                        det_y[n_det] = y;
+                                        det_z[n_det] = z;
+                                        n_det++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for (gk = 0; gk < n_det && g_battle.mission_ended == 0; gk++) {
+                if (hidden_screen_up) {
+                    if (need_hidden_pause) {
+                        game_wait_frames(settings_hidden_banner_frames());
+                        need_hidden_pause = 0;
+                    }
+                    hidden_screen_up = 0;
+                    any_alien_seen = 1;
+                }
+                g_battle.view_level = det_z[gk];
+                isomap_center_camera_on(det_x[gk], det_y[gk], det_z[gk]);
+                set_status("TIMED GRENADE DETONATED!");
+                detonate_explosion(det_x[gk], det_y[gk], det_z[gk], 0);
+                isomap_recalc_lighting_and_fov();
+                check_victory_state();
+            }
+        }
     }
 
     /* Hold HIDDEN.BMP cleanly before transitioning to the Operatives Turn splash */
@@ -3839,13 +4411,23 @@ void isomap_render(void) {
                     }
                 }
                 {
-                    int gk;
-                    for (gk = 0; gk < 4; gk++) {
+                    int gk, drawn = 0;
+                    for (gk = 0; gk < MAX_GND_ITEMS && drawn < 4; gk++) {
                         int gid = cell->gnd_item[gk];
                         if (gid >= 0 && gid < ITEM_COUNT) {
-                            vga_blit_shaded(sx + 6 + (gk & 1) * 4, sy + 2 + (gk >> 1) * 2,
+                            int gx = sx + 6 + (drawn & 1) * 4;
+                            int gy = sy + 2 + (drawn >> 1) * 2;
+                            vga_blit_shaded(gx, gy,
                                             GROUND_ITEM_W, GROUND_ITEM_H,
                                             spr_ground_items[gid], shade, VIEWPORT_H);
+                            if (cell->gnd_prime[gk] >= 0) {
+                                uint8_t pcol = ((g_battle.anim_tick & 8) != 0) ? 33 : 96;
+                                vga_pset_clip(gx + 7, gy + 1, pcol, VIEWPORT_H);
+                                vga_pset_clip(gx + 8, gy + 1, pcol, VIEWPORT_H);
+                                vga_pset_clip(gx + 7, gy + 2, pcol, VIEWPORT_H);
+                                vga_pset_clip(gx + 8, gy + 2, pcol, VIEWPORT_H);
+                            }
+                            drawn++;
                         }
                     }
                 }

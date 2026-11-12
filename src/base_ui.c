@@ -838,41 +838,11 @@ void base_ui_handle_input(void) {
     }
 }
 
-static int cycle_researched_wep_armory(int cur_wep, int dir) {
-    int i;
-    for (i = 1; i <= ITEM_COUNT; i++) {
-        int cand = (cur_wep + i * dir + ITEM_COUNT * 4) % ITEM_COUNT;
-        if (item_is_weapon(cand) && campaign_is_item_researched(cand) &&
-            campaign_is_item_discovered(cand)) {
-            return cand;
-        }
-    }
-    return ITEM_ASSAULT_RIFLE;
-}
-
-static int cycle_researched_gren_armory(int cur_gren) {
-    static const int grens[3] = { ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE, ITEM_ALIEN_GRENADE };
-    int i, cur_idx = 0;
-    for (i = 0; i < 3; i++) {
-        if (grens[i] == cur_gren) cur_idx = i;
-    }
-    for (i = 1; i <= 3; i++) {
-        int cand = grens[(cur_idx + i) % 3];
-        if (campaign_is_item_researched(cand) && campaign_is_item_discovered(cand)) {
-            return cand;
-        }
-    }
-    return ITEM_FRAG_GRENADE;
-}
-
 void armory_ui_render(void) {
     int mx = g_input.mx, my = g_input.my;
     int sel = g_camp.selected_soldier % MAX_SQUAD_SIZE;
     const Operative *op = &g_camp.squad[sel];
     const ItemDef *wdef = item_get_def(op->weapon_id);
-    int ammo_id = (wdef->ammo_item_id >= 0) ? wdef->ammo_item_id : ITEM_RIFLE_MAG;
-    int gren_id = (op->grenade_id >= 0 && campaign_is_item_researched(op->grenade_id))
-                  ? op->grenade_id : ITEM_FRAG_GRENADE;
     int bonus_hp = 0, bonus_tu = 0, r, c, b;
     static const char *top_lbl[3] = { "AGENT", "ARV BUS", "MEMORIAL" };
     char buf[64];
@@ -986,7 +956,7 @@ void armory_ui_render(void) {
     }
 
 
-    /* Subtab 0: Single-Operative Dossier (Left) & Equipment Assignment (Right) */
+    /* Subtab 0: Single-Operative Dossier (Left) & Full-Body Suit / ARV Bay Status (Right) */
     vga_rect_bevel(6, 23, 88, 140, 74, 68, 79);
     operative_draw_rank_badge(10, 27, op->rank);
     operative_format_full_name(op, buf, sizeof(buf));
@@ -1013,45 +983,40 @@ void armory_ui_render(void) {
     vga_print(10, 146, "ID LOCKED", 8);
 
     vga_rect_bevel(96, 23, 145, 140, 74, 68, 79);
-    vga_print_shadow(100, 26, "EQUIPMENT & WEAPONS", 96, 15);
+    vga_print_shadow(100, 26, "OPERATIVE COMBAT SUIT", 96, 15);
 
-    vga_rect_bevel(99, 36, 139, 29, 14, 80, 15);
-    vga_blit_ui(101, 42, ITEM_ICON_W, ITEM_ICON_H, spr_item_icons[op->weapon_id]);
-    vga_print_shadow(135, 39, wdef->short_name, 96, 15);
-    snprintf(buf, sizeof(buf), "DMG:%d", wdef->dmg_base);
-    vga_print(135, 50, buf, 18);
-    vga_rect_bevel(192, 40, 42, 20, 68, 96, 79);
-    vga_print_shadow(198, 46, "SWAP", 96, 15);
+    /* Full-Body Operative Paper-Doll Scanner Preview (x=100..153, y=36..135) */
+    vga_rect_bevel(100, 36, 54, 100, 13, 68, 15);
+    for (r = 44; r < 132; r += 12) {
+        vga_hline(102, 151, r, 78);
+    }
+    vga_blit_ui(103, 38, FULLBODY_W, FULLBODY_H, spr_fullbody[op->portrait_id % NUM_PORTRAITS]);
 
-    vga_rect_bevel(99, 67, 139, 29, 14, 68, 15);
-    vga_blit_ui(101, 73, ITEM_ICON_W, ITEM_ICON_H, spr_item_icons[ammo_id]);
-    vga_print_shadow(135, 70, item_get_def(ammo_id)->short_name, 80, 15);
-    snprintf(buf, sizeof(buf), "CLIPS:%d", 1 + op->extra_clips);
-    vga_print(135, 81, buf, 144);
-    vga_rect_bevel(192, 71, 20, 20, 68, 162, 79); vga_print_shadow(199, 77, "-", 96, 15);
-    vga_rect_bevel(214, 71, 20, 20, 68, 162, 79); vga_print_shadow(221, 77, "+", 96, 15);
+    /* Service Dossier & ARV Deployment Notice (x=157..237, y=36..135) */
+    vga_rect_bevel(157, 36, 80, 100, 14, 68, 15);
+    vga_print_shadow(161, 40, "STATUS:", 80, 15);
+    vga_print(161, 49, "ACTIVE DUTY", 18);
 
-    vga_rect_bevel(99, 98, 139, 29, 14, 68, 15);
-    vga_blit_ui(101, 104, ITEM_ICON_W, ITEM_ICON_H, spr_item_icons[gren_id]);
-    vga_print_shadow(135, 101, item_get_def(gren_id)->short_name, 96, 15);
-    snprintf(buf, sizeof(buf), "GREN:%d", op->grenades);
-    vga_print(135, 112, buf, 18);
-    vga_rect_bevel(192, 102, 20, 20, 68, 162, 79); vga_print_shadow(199, 108, "-", 96, 15);
-    vga_rect_bevel(214, 102, 20, 20, 68, 162, 79); vga_print_shadow(221, 108, "+", 96, 15);
+    vga_print_shadow(161, 61, "FAV WEAPON:", 80, 15);
+    vga_print(161, 70, wdef->short_name, 96);
 
-    vga_rect_bevel(99, 129, 139, 29, 14, 68, 15);
-    vga_blit_ui(101, 135, ITEM_ICON_W, ITEM_ICON_H, spr_item_icons[ITEM_FLARE]);
-    vga_print_shadow(135, 132, "E-FLARE", 80, 15);
-    snprintf(buf, sizeof(buf), "FLR:%d", op->flares);
-    vga_print(135, 143, buf, 18);
-    vga_rect_bevel(192, 133, 20, 20, 68, 162, 79); vga_print_shadow(199, 139, "-", 96, 15);
-    vga_rect_bevel(214, 133, 20, 20, 68, 162, 79); vga_print_shadow(221, 139, "+", 96, 15);
+    vga_print_shadow(161, 82, "ARV CARGO:", 80, 15);
+    snprintf(buf, sizeof(buf), "%d/%d SLOTS", campaign_arv_used_space(), campaign_arv_max_space());
+    vga_print(161, 91, buf, 144);
+
+    vga_print(161, 106, "EQUIP IN ARV", 8);
+    vga_print(161, 115, "AT MSN START", 8);
+
+    {
+        int hov_bus = (mx >= 100 && mx < 237 && my >= 139 && my < 158);
+        vga_rect_bevel(100, 139, 137, 19, hov_bus ? 65 : 68, hov_bus ? 96 : 162, 79);
+        vga_print_shadow(112, 145, "LOAD ARV BUS CARGO", hov_bus ? 96 : 1, 15);
+    }
 }
 
 void armory_ui_handle_input(void) {
     int mx = g_input.mx, my = g_input.my;
     int sel = g_camp.selected_soldier % MAX_SQUAD_SIZE;
-    Operative *op = &g_camp.squad[sel];
 
     /* Top Bar: [<] [>] Operative Cycle + [AGENT] [ARV BUS] [MEMORIAL] Subtabs */
     if (my >= 6 && my < 21) {
@@ -1132,44 +1097,11 @@ void armory_ui_handle_input(void) {
         return;
     }
 
-
-    /* Subtab 0: Single-Operative Equipment Slots (x=99..238) */
-    if (mx >= 99 && mx < 238) {
-        if (my >= 36 && my < 65) {
-            op->weapon_id = cycle_researched_wep_armory(op->weapon_id, 1);
-            snprintf(g_camp.notice, sizeof(g_camp.notice), "EQUIPPED %s ON %s",
-                     item_get_def(op->weapon_id)->full_name, op->name);
-            sfx_click();
-        } else if (my >= 67 && my < 96) {
-            if (mx >= 192 && mx < 212 && op->extra_clips > 0) {
-                op->extra_clips--;
-                sfx_click();
-            } else if (mx >= 214 && mx < 234 && op->extra_clips < 4) {
-                op->extra_clips++;
-                sfx_click();
-            }
-        } else if (my >= 98 && my < 127) {
-            if (mx >= 192 && mx < 212 && op->grenades > 0) {
-                op->grenades--;
-                sfx_click();
-            } else if (mx >= 214 && mx < 234 && op->grenades < 4) {
-                op->grenades++;
-                sfx_click();
-            } else if (mx < 190) {
-                op->grenade_id = cycle_researched_gren_armory(op->grenade_id);
-                snprintf(g_camp.notice, sizeof(g_camp.notice), "GRENADE TYPE: %s",
-                         item_get_def(op->grenade_id)->full_name);
-                sfx_click();
-            }
-        } else if (my >= 129 && my < 158) {
-            if (mx >= 192 && mx < 212 && op->flares > 0) {
-                op->flares--;
-                sfx_click();
-            } else if (mx >= 214 && mx < 234 && op->flares < 3) {
-                op->flares++;
-                sfx_click();
-            }
-        }
+    /* Subtab 0: Click [LOAD ARV BUS CARGO] button to open ARV Bus Cargo subtab */
+    if (mx >= 100 && mx < 237 && my >= 139 && my < 158) {
+        g_camp.armory_subtab = 1;
+        g_camp.store_scroll  = 0;
+        sfx_click();
     }
 }
 

@@ -17,7 +17,7 @@
 #define FX_W     24
 #define FX_H     24
 
-#define NUM_UNIT_SPRITES 11
+#define NUM_UNIT_SPRITES 15
 #define NUM_PORTRAITS    12
 
 /* Unit Sprite Sheet Row Groups (each has 4 poses x 8 directions of 24x32) */
@@ -31,8 +31,12 @@ enum {
     UNIT_SPR_SECTOID,        /* Alien Sectoid */
     UNIT_SPR_FLOATER,        /* Alien Floater */
     UNIT_SPR_MUTON,          /* Alien Muton */
-    UNIT_SPR_CIV_MALE,       /* Local Coopersburg Civilian (Male, unarmed) */
-    UNIT_SPR_CIV_FEM         /* Local Coopersburg Civilian (Female, unarmed) */
+    UNIT_SPR_CIV_MALE,       /* Male Civilian 0: Tan/Amber Bomber Jacket & Jeans */
+    UNIT_SPR_CIV_MALE_FLAN,  /* Male Civilian 1: Red Plaid Flannel & Work Boots */
+    UNIT_SPR_CIV_MALE_WORK,  /* Male Civilian 2: Olive Work Vest & Cyan Shirt */
+    UNIT_SPR_CIV_FEM,        /* Female Civilian 0: Redhead Teal Diner/Windbreaker */
+    UNIT_SPR_CIV_FEM_BLONDE, /* Female Civilian 1: Blonde Gold Cardigan & Jeans */
+    UNIT_SPR_CIV_FEM_DARK    /* Female Civilian 2: Dark Hair Berry Coat & Slacks */
 };
 
 /* Floor Tile IDs */
@@ -183,8 +187,12 @@ extern uint8_t spr_muzzle[PROJ_TYPE_COUNT][FX_W * FX_H];
 extern uint8_t spr_reticle[2][FX_W * FX_H];     /* [0=Clear Lock-On, 1=Blocked LOS] */
 extern uint8_t spr_splash[SPLASH_TYPE_COUNT][4][FX_W * FX_H];
 
-/* Portraits (12 x 32x36: 0..5 Male, 6..11 Female) & Weapon Icons (40x24) for the HUD */
+#define FULLBODY_W       48
+#define FULLBODY_H       96
+
+/* Portraits (12 x 32x36: 0..5 Male, 6..11 Female), Full-Body Paper-Dolls (12 x 48x96) & Weapon Icons (40x24) */
 extern uint8_t spr_portraits[NUM_PORTRAITS][32 * 36];
+extern uint8_t spr_fullbody[NUM_PORTRAITS][FULLBODY_W * FULLBODY_H];
 extern uint8_t spr_weapons[4][40 * 24];
 
 /* Optional full-frame BMP graphic resources loaded from assets/*.BMP */

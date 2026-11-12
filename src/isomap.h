@@ -10,6 +10,11 @@
 
 #define MAX_UNITS 24
 
+#define MAX_GND_ITEMS   16
+#define INV_BELT_SMALL  4
+#define INV_BELT_LARGE  2
+#define INV_BACKPACK_SZ 6
+
 #define FACTION_DUFFCOM  0
 #define FACTION_ALIEN    1
 #define FACTION_CIVILIAN 2
@@ -42,7 +47,8 @@ typedef struct {
     uint8_t smoke;          /* Remaining turns of animated smoke (0 = clear, 1..7 = wisp to heavy plume) */
     uint8_t fire;           /* Remaining turns of active fire (0 = out, 1..4 = burning) */
     int8_t  unit_idx;       /* -1 if empty, else index in g_units[] */
-    int8_t  gnd_item[4];    /* Persistent items laying on ground (-1 = empty, 0..ITEM_COUNT-1) */
+    int8_t  gnd_item[MAX_GND_ITEMS];  /* Persistent items laying on ground (-1 = empty, 0..ITEM_COUNT-1) */
+    int8_t  gnd_prime[MAX_GND_ITEMS]; /* Primed fuse timer on ground item (-1 = unprimed, 0..6 = turns left) */
 } MapCell;
 
 
@@ -61,6 +67,15 @@ typedef struct {
     int grenade_id;     /* ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE, or ITEM_ALIEN_GRENADE */
     int grenades;       /* High-Explosive grenades remaining */
     int flares;         /* Night Electro-Flares remaining */
+    int active_hand;    /* 0 = Right Hand (SLOT_RHAND), 1 = Left Hand (SLOT_LHAND) */
+    int rhand_item;     /* ITEM_* held in Right Hand (-1 = empty) */
+    int rhand_ammo;     /* Loaded rounds in Right Hand weapon */
+    int lhand_item;     /* ITEM_* held in Left Hand (-1 = empty) */
+    int lhand_ammo;     /* Loaded rounds in Left Hand weapon */
+    int belt_small[INV_BELT_SMALL]; /* 4 Compact Belt Pouch slots (-1 = empty) */
+    int belt_large[INV_BELT_LARGE]; /* 2 Large Belt Holster/Pouch slots (-1 = empty) */
+    int backpack[INV_BACKPACK_SZ];  /* 6 Backpack Grid slots (-1 = empty) */
+    int8_t slot_prime[14]; /* Primed fuse timer per operative slot (-1 = unprimed, 0..6 = turns left) */
     int x, y, z;        /* Map tile coordinates */
     int dir;            /* 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW */
     int stance;         /* 0=Standing, 1=Kneeling */
@@ -71,7 +86,7 @@ typedef struct {
     int pixel_off_y;
     int tu, tu_max;
     int hp, hp_max;
-    int energy, energy_max;
+    int energy, energy_max, base_energy_max;
     int morale;
     int firing_acc;     /* Base firing accuracy % */
     int throw_acc;      /* Base throwing accuracy % */
@@ -94,6 +109,8 @@ typedef struct {
     int reserve_mode;       /* 0 = Free Move, 1 = Reserve Snap (12 TU), 2 = Reserve Aimed (20 TU) */
     int fire_mode;          /* 0 = Move, 1 = Snap, 2 = Aimed, 3 = Auto, 4 = Grenade, 5 = Flare, 6 = Throw Item */
     int throw_item_id;      /* ITEM_* queued to be thrown when fire_mode == 6 */
+    int throw_hand_slot;    /* 0 = Right Hand, 1 = Left Hand queued for throw */
+    int throw_prime;        /* -1 = unprimed, 0..6 = fuse timer on thrown item */
     int weapon_menu_open;   /* 1 = Popup firing mode selector open above HUD */
     int pre_mission_equip;  /* 1 = Pre-Mission ARV Equip Screen active before Turn 1 starts */
     int inv_modal_open;     /* 1 = Operative Inventory / Ground / Corpse / ARV Modal open */
@@ -165,6 +182,7 @@ void        isomap_clear_prop_at(int z, int y, int x, uint8_t new_obj, uint8_t m
 /* Tactical actions */
 int  isomap_has_los(int x0, int y0, int z0, int x1, int y1, int z1);
 void isomap_select_next_soldier(void);
+void isomap_select_prev_soldier(void);
 void isomap_toggle_kneel(void);
 void isomap_turn_unit_toward(Unit *u, int tx, int ty);
 void isomap_move_or_interact(int tx, int ty);
@@ -174,6 +192,14 @@ void isomap_end_turn(void);
 
 int  isomap_unit_in_bus(const Unit *u);
 void isomap_drop_ground_item(int x, int y, int z, int item_id);
+void isomap_drop_ground_item_primed(int x, int y, int z, int item_id, int prime_turns);
+void isomap_init_unit_slots_from_summary(Unit *u);
+void isomap_sync_unit_inventory(Unit *u);
+int  isomap_consume_unit_item(Unit *u, int item_id);
+int  isomap_give_unit_item(Unit *u, int item_id);
+int  isomap_unit_carried_weight(const Unit *u);
+int  isomap_unit_move_tu_pct(const Unit *u);
+int  isomap_unit_two_hand_penalty_pct(const Unit *u);
 
 
 /* Rendering */

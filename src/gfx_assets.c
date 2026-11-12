@@ -19,6 +19,7 @@ uint8_t spr_muzzle[PROJ_TYPE_COUNT][FX_W * FX_H];
 uint8_t spr_reticle[2][FX_W * FX_H];
 uint8_t spr_splash[SPLASH_TYPE_COUNT][4][FX_W * FX_H];
 uint8_t spr_portraits[NUM_PORTRAITS][32 * 36];
+uint8_t spr_fullbody[NUM_PORTRAITS][FULLBODY_W * FULLBODY_H];
 uint8_t spr_weapons[4][40 * 24];
 
 uint8_t *gfx_title_bg  = NULL;
@@ -1114,12 +1115,16 @@ static void build_units(void) {
                     dst[(15 + y_off) * UNIT_W + 17] = 145;
                     dst[(16 + y_off) * UNIT_W + 16] = 144;
                 } else {
-                    /* COOPERSBURG LOCAL CIVILIAN (Unarmed Male 9 & Female 10) */
-                    int is_fem = (type == UNIT_SPR_CIV_FEM);
-                    uint8_t hair_c = is_fem ? 36 : 54;
-                    uint8_t skin_c = 244;
-                    uint8_t jkt_hi = is_fem ? 98 : 114; /* Gold/yellow or warm amber jacket */
-                    uint8_t jkt_sh = is_fem ? 101 : 52;
+                    /* COOPERSBURG LOCAL CIVILIANS (Fallback for 9..14, overridden by UNITS.BMP) */
+                    int c_idx = type - UNIT_SPR_CIV_MALE;
+                    int is_fem = (c_idx >= 3);
+                    static const uint8_t c_hair[6] = { 54, 98, 14, 36, 98, 14 };
+                    static const uint8_t c_jkt_hi[6] = { 114, 34, 21, 80, 96, 35 };
+                    static const uint8_t c_jkt_sh[6] = {  52, 38, 25, 83,100, 39 };
+                    uint8_t hair_c = c_hair[c_idx % 6];
+                    uint8_t skin_c = (c_idx == 2) ? 56 : 244;
+                    uint8_t jkt_hi = c_jkt_hi[c_idx % 6];
+                    uint8_t jkt_sh = c_jkt_sh[c_idx % 6];
                     uint8_t tee_c  = is_fem ? 81 : 2;
                     /* Denim jeans & shoes */
                     for (y = 20 + (pose == 1 ? 2 : 0); y < 28 + leg_l_off / 2; y++) {
@@ -1194,9 +1199,13 @@ static void build_deaths(void) {
             body_hi = 18;  body_sh = 21;
             head_c  = 131; leg_c   = 130; blood_c = 21;
         } else {
-            body_hi = (type == UNIT_SPR_CIV_FEM) ? 98 : 114;
-            body_sh = (type == UNIT_SPR_CIV_FEM) ? 101 : 52;
-            head_c  = (type == UNIT_SPR_CIV_FEM) ? 36 : 54;
+            static const uint8_t c_hair[6]   = { 54, 98, 14, 36, 98, 14 };
+            static const uint8_t c_jkt_hi[6] = { 114, 34, 21, 80, 96, 35 };
+            static const uint8_t c_jkt_sh[6] = {  52, 38, 25, 83,100, 39 };
+            int c_idx = (type - UNIT_SPR_CIV_MALE) % 6;
+            body_hi = c_jkt_hi[c_idx];
+            body_sh = c_jkt_sh[c_idx];
+            head_c  = c_hair[c_idx];
             leg_c   = 67;  blood_c = 38;
         }
 
@@ -1446,6 +1455,7 @@ static void build_fx(void) {
 }
 
 static void build_hud_sprites(void) {
+    static const uint8_t hair_cols[12] = {56, 98, 60, 54, 14, 4, 36, 97, 14, 59, 55, 2};
     int p, w, x, y;
     /* Soldier portraits (12 x 32x36: 0..5 Male, 6..11 Female) */
     for (p = 0; p < NUM_PORTRAITS; p++) {
@@ -1455,7 +1465,6 @@ static void build_hud_sprites(void) {
                 if (y >= 26 && x >= 4 && x <= 27) c = 66;
                 if (y >= 9 && y < 26 && x >= 9 && x <= 22) c = (uint8_t)(242 + (p % 4));
                 if (y >= 5 && y < 12 && x >= 8 && x <= 23) {
-                    static const uint8_t hair_cols[12] = {56, 98, 60, 54, 14, 4, 36, 97, 14, 59, 55, 2};
                     c = hair_cols[p];
                 }
                 if (y == 15 && (x == 12 || x == 13 || x == 18 || x == 19)) {
@@ -1463,6 +1472,60 @@ static void build_hud_sprites(void) {
                 }
                 if (y == 21 && x >= 13 && x <= 18) c = (p >= 6) ? 38 : 54;
                 spr_portraits[p][y * 32 + x] = c;
+            }
+        }
+    }
+
+    /* Full-Body Paper-Doll Operative Sprites (12 x 48x96: 0..5 Male, 6..11 Female) */
+    for (p = 0; p < NUM_PORTRAITS; p++) {
+        int is_fem = (p >= 6);
+        uint8_t skin_c = (uint8_t)(242 + (p % 4));
+        uint8_t hair_c = hair_cols[p];
+        uint8_t *fb = spr_fullbody[p];
+        memset(fb, COL_TRANS, FULLBODY_W * FULLBODY_H);
+
+        /* Floor pedestal shadow (y=87..92) */
+        for (y = 87; y <= 92; y++) {
+            for (x = 10; x < 38; x++) {
+                int dx = x - 24, dy = (y - 89) * 3;
+                if (dx * dx + dy * dy <= 144) {
+                    fb[y * FULLBODY_W + x] = (dx * dx + dy * dy > 100) ? 68 : 13;
+                }
+            }
+        }
+        /* Legs, Knee Pads & Combat Boots (y=49..88) */
+        for (y = 49; y <= 88; y++) {
+            int l0 = is_fem ? 16 : 15, l1 = 22;
+            int r0 = 25, r1 = is_fem ? 31 : 32;
+            uint8_t col = (y >= 78) ? 10 : (y >= 62 && y <= 67) ? 81 : 67;
+            for (x = l0; x <= l1; x++) fb[y * FULLBODY_W + x] = (x == l0 || x == l1) ? 14 : col;
+            for (x = r0; x <= r1; x++) fb[y * FULLBODY_W + x] = (x == r0 || x == r1) ? 14 : col;
+        }
+        /* Tactical Utility Belt (y=44..48) */
+        for (y = 44; y <= 48; y++) {
+            for (x = 14; x <= 33; x++) {
+                fb[y * FULLBODY_W + x] = (x >= 22 && x <= 25) ? 96 : 11;
+            }
+        }
+        /* Armored Chest Cuirass & Shoulder Pauldrons (y=22..43) */
+        for (y = 22; y <= 43; y++) {
+            int hw = is_fem ? (y < 32 ? 9 : 7) : (y < 32 ? 10 : 8);
+            for (x = 24 - hw; x <= 23 + hw; x++) {
+                fb[y * FULLBODY_W + x] = (x == 24 - hw || x == 23 + hw) ? 14 : 66;
+            }
+            /* Left & Right Arms / Pauldrons */
+            for (x = 8; x <= 14; x++)  fb[y * FULLBODY_W + x] = (y < 30) ? 65 : 68;
+            for (x = 33; x <= 39; x++) fb[y * FULLBODY_W + x] = (y < 30) ? 65 : 68;
+        }
+        /* Head, Hair & Visor (y=5..21) */
+        for (y = 5; y <= 21; y++) {
+            for (x = 18; x <= 29; x++) {
+                if (y <= 9) fb[y * FULLBODY_W + x] = hair_c;
+                else if (y <= 19) fb[y * FULLBODY_W + x] = skin_c;
+                else fb[y * FULLBODY_W + x] = 68;
+            }
+            if ((y == 11 || y == 12) && (p == 0 || p == 4 || p == 8)) {
+                for (x = 19; x <= 28; x++) fb[y * FULLBODY_W + x] = 80;
             }
         }
     }
@@ -1547,7 +1610,7 @@ static void load_bmp_overrides(void) {
         free(sheet);
     }
 
-    /* 4. UNITS.BMP (8 cols [dir 0..7] x 36 rows [sprite_id*4 + pose] of 24x32) */
+    /* 4. UNITS.BMP (8 cols [dir 0..7] x 60 rows [sprite_id*4 + pose] of 24x32) */
     sheet = bmp_load_alloc("UNITS.BMP", &sw, &sh);
     if (sheet) {
         for (t = 0; t < NUM_UNIT_SPRITES; t++) {
@@ -1563,7 +1626,7 @@ static void load_bmp_overrides(void) {
         free(sheet);
     }
 
-    /* 4b. DEATH.BMP (4 cols [stage 0..3] x 9 rows [sprite_id 0..8] of 32x32) */
+    /* 4b. DEATH.BMP (4 cols [stage 0..3] x 15 rows [sprite_id 0..14] of 32x32) */
     sheet = bmp_load_alloc("DEATH.BMP", &sw, &sh);
     if (sheet) {
         for (t = 0; t < NUM_UNIT_SPRITES && (t + 1) * DEATH_H <= sh; t++) {
@@ -1613,6 +1676,15 @@ static void load_bmp_overrides(void) {
     if (sheet) {
         for (i = 0; i < NUM_PORTRAITS && (i + 1) * 32 <= sw; i++) {
             bmp_extract_tile(sheet, sw, sh, i * 32, 0, 32, 36, spr_portraits[i]);
+        }
+        free(sheet);
+    }
+
+    /* 5b. FULLBODY.BMP (12 full-body operative paper-doll figures x 48x96) */
+    sheet = bmp_load_alloc("FULLBODY.BMP", &sw, &sh);
+    if (sheet) {
+        for (i = 0; i < NUM_PORTRAITS && (i + 1) * FULLBODY_W <= sw && sh >= FULLBODY_H; i++) {
+            bmp_extract_tile(sheet, sw, sh, i * FULLBODY_W, 0, FULLBODY_W, FULLBODY_H, spr_fullbody[i]);
         }
         free(sheet);
     }

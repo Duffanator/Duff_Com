@@ -18,21 +18,21 @@ static const ItemDef item_defs[ITEM_COUNT] = {
         ITEM_PISTOL_CLIP, 12, PROJ_BULLET,
         24, 10, 0,
         10, 68,  16, 105,  18, 36,
-        TECH_NONE, 250, 125, 0, 0, 0, 0, 1
+        TECH_NONE, 250, 125, 0, 0, 0, 0, 1, 3
     },
     {
         ITEM_ASSAULT_RIFLE, "A.RIFLE", "5.56MM ASSAULT RIFLE", ICAT_WEAPON,
         ITEM_RIFLE_MAG, 20, PROJ_BULLET,
         32, 14, 0,
         12, 72,  20, 120,  18, 40,
-        TECH_NONE, 550, 275, 0, 0, 0, 0, 2
+        TECH_NONE, 550, 275, 0, 0, 0, 0, 2, 7
     },
     {
         ITEM_HEAVY_RIFLE, "HVY.RFL", "7.62MM HEAVY RIFLE", ICAT_WEAPON,
         ITEM_HEAVY_MAG, 15, PROJ_BULLET,
         46, 18, 0,
         15, 68,  24, 125,  22, 35,
-        TECH_NONE, 850, 425, 0, 0, 0, 0, 3
+        TECH_NONE, 850, 425, 0, 0, 0, 0, 3, 12
     },
 
 
@@ -41,19 +41,19 @@ static const ItemDef item_defs[ITEM_COUNT] = {
         ITEM_PISTOL_CLIP, "9MM.CLP", "9MM PISTOL CLIP (12)", ICAT_AMMO,
         ITEM_NONE, 12, PROJ_BULLET,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_NONE, 35, 15, 0, 0, 0, 0, 1
+        TECH_NONE, 35, 15, 0, 0, 0, 0, 1, 1
     },
     {
         ITEM_RIFLE_MAG, "556.MAG", "5.56MM RIFLE MAG (20)", ICAT_AMMO,
         ITEM_NONE, 20, PROJ_BULLET,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_NONE, 60, 25, 0, 0, 0, 0, 1
+        TECH_NONE, 60, 25, 0, 0, 0, 0, 1, 2
     },
     {
         ITEM_HEAVY_MAG, "762.DRM", "7.62MM HEAVY DRUM (15)", ICAT_AMMO,
         ITEM_NONE, 15, PROJ_BULLET,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_NONE, 90, 40, 0, 0, 0, 0, 1
+        TECH_NONE, 90, 40, 0, 0, 0, 0, 1, 4
     },
 
     /* 3. Human Thrown Munitions & Utility */
@@ -62,21 +62,21 @@ static const ItemDef item_defs[ITEM_COUNT] = {
         ITEM_NONE, 1, PROJ_BULLET,
         55, 20, 2,
         16, 100, 0, 0, 0, 0,
-        TECH_NONE, 100, 50, 0, 0, 0, 0, 1
+        TECH_NONE, 100, 50, 0, 0, 0, 0, 1, 2
     },
     {
         ITEM_HEAVY_GRENADE, "HE.CHRG", "HEAVY HE SATCHEL", ICAT_GRENADE,
         ITEM_NONE, 1, PROJ_BULLET,
         85, 25, 3,
         20, 100, 0, 0, 0, 0,
-        TECH_NONE, 220, 110, 0, 0, 0, 0, 1
+        TECH_NONE, 220, 110, 0, 0, 0, 0, 1, 5
     },
     {
         ITEM_FLARE, "E-FLARE", "NIGHT ELECTRO-FLARE", ICAT_UTILITY,
         ITEM_NONE, 1, PROJ_LASER,
         0, 0, 0,
         10, 100, 0, 0, 0, 0,
-        TECH_NONE, 40, 20, 0, 0, 0, 0, 1
+        TECH_NONE, 40, 20, 0, 0, 0, 0, 1, 1
     },
 
     /* 4. Coopersburg Prototype Laser Weapons & Batteries */
@@ -85,34 +85,34 @@ static const ItemDef item_defs[ITEM_COUNT] = {
         ITEM_LASER_BATTERY, 15, PROJ_LASER,
         38, 14, 0,
         10, 74,  16, 112,  18, 44,
-        TECH_LASER_WEAPONS, 900, 450, 1, 300, 2, 0, 1
+        TECH_LASER_WEAPONS, 900, 450, 1, 300, 2, 0, 1, 4
     },
     {
         ITEM_LASER_RIFLE, "LSR.RFL", "PROTOTYPE LASER RIFLE", ICAT_WEAPON,
         ITEM_LASER_BATTERY, 12, PROJ_LASER,
         52, 18, 0,
         12, 78,  20, 124,  18, 46,
-        TECH_LASER_WEAPONS, 1400, 700, 1, 500, 4, 0, 2
+        TECH_LASER_WEAPONS, 1400, 700, 1, 500, 4, 0, 2, 8
     },
     {
         ITEM_HEAVY_LASER, "HVY.LSR", "HEAVY LASER CANNON", ICAT_WEAPON,
         ITEM_HEAVY_LASER_PAK, 8, PROJ_LASER,
         74, 24, 0,
         16, 74,  25, 128,  22, 38,
-        TECH_HEAVY_LASER, 2100, 1050, 1, 800, 6, 0, 3
+        TECH_HEAVY_LASER, 2100, 1050, 1, 800, 6, 0, 3, 14
     },
 
     {
         ITEM_LASER_BATTERY, "LSR.BAT", "LASER CELL BATTERY", ICAT_AMMO,
         ITEM_NONE, 12, PROJ_LASER,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_LASER_WEAPONS, 120, 60, 1, 40, 1, 0, 1
+        TECH_LASER_WEAPONS, 120, 60, 1, 40, 1, 0, 1, 2
     },
     {
         ITEM_HEAVY_LASER_PAK, "HVY.PAK", "HIGH-CAP LASER PACK", ICAT_AMMO,
         ITEM_NONE, 8, PROJ_LASER,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_HEAVY_LASER, 200, 100, 1, 75, 1, 0, 1
+        TECH_HEAVY_LASER, 200, 100, 1, 75, 1, 0, 1, 4
     },
 
     /* 5. Alien Elerium Plasma Weapons, Cartridges & Grenades */
@@ -121,89 +121,89 @@ static const ItemDef item_defs[ITEM_COUNT] = {
         ITEM_PLASMA_PISTOL_CLIP, 15, PROJ_PLASMA,
         52, 18, 0,
         11, 75,  18, 115,  18, 44,
-        TECH_PLASMA_PISTOL, 2200, 1100, 1, 700, 3, 1, 1
+        TECH_PLASMA_PISTOL, 2200, 1100, 1, 700, 3, 1, 1, 4
     },
     {
         ITEM_PLASMA_RIFLE, "PLS.RFL", "ALIEN PLASMA RIFLE", ICAT_WEAPON,
         ITEM_PLASMA_RIFLE_CLIP, 12, PROJ_PLASMA,
         72, 22, 0,
         12, 80,  20, 126,  18, 48,
-        TECH_PLASMA_RIFLE, 3400, 1700, 1, 1100, 5, 2, 2
+        TECH_PLASMA_RIFLE, 3400, 1700, 1, 1100, 5, 2, 2, 8
     },
     {
         ITEM_HEAVY_PLASMA, "HVY.PLS", "HEAVY PLASMA CANNON", ICAT_WEAPON,
         ITEM_HEAVY_PLASMA_CLIP, 10, PROJ_PLASMA,
         98, 28, 0,
         15, 78,  23, 130,  20, 50,
-        TECH_HEAVY_PLASMA, 4800, 2400, 1, 1600, 8, 4, 3
+        TECH_HEAVY_PLASMA, 4800, 2400, 1, 1600, 8, 4, 3, 13
     },
 
     {
         ITEM_PLASMA_PISTOL_CLIP, "PP.CART", "PLASMA PISTOL CLIP", ICAT_AMMO,
         ITEM_NONE, 15, PROJ_PLASMA,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_PLASMA_PISTOL, 350, 175, 1, 120, 1, 1, 1
+        TECH_PLASMA_PISTOL, 350, 175, 1, 120, 1, 1, 1, 1
     },
     {
         ITEM_PLASMA_RIFLE_CLIP, "PR.CART", "PLASMA RIFLE CLIP", ICAT_AMMO,
         ITEM_NONE, 12, PROJ_PLASMA,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_PLASMA_RIFLE, 500, 250, 1, 180, 1, 1, 1
+        TECH_PLASMA_RIFLE, 500, 250, 1, 180, 1, 1, 1, 2
     },
     {
         ITEM_HEAVY_PLASMA_CLIP, "HP.CORE", "HEAVY PLASMA CORE", ICAT_AMMO,
         ITEM_NONE, 10, PROJ_PLASMA,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_HEAVY_PLASMA, 750, 375, 1, 250, 2, 2, 1
+        TECH_HEAVY_PLASMA, 750, 375, 1, 250, 2, 2, 1, 4
     },
     {
         ITEM_ALIEN_GRENADE, "ALN.GRN", "ALIEN PULSE GRENADE", ICAT_GRENADE,
         ITEM_NONE, 1, PROJ_PLASMA,
         110, 30, 3,
         18, 100, 0, 0, 0, 0,
-        TECH_ALIEN_GRENADE, 600, 300, 1, 200, 1, 1, 1
+        TECH_ALIEN_GRENADE, 600, 300, 1, 200, 1, 1, 1, 2
     },
 
     /* 6. Recovered Alien Materials, UFO Subsystems & Corpses (Never Purchasable!) */
     {
         ITEM_ELERIUM, "ELERIUM", "ELERIUM-115 POD", ICAT_ARTIFACT,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_NONE, 0, 400, 0, 0, 0, 0, 1
+        TECH_NONE, 0, 400, 0, 0, 0, 0, 1, 4
     },
     {
         ITEM_ALLOYS, "ALLOYS", "ALIEN HULL ALLOYS", ICAT_ARTIFACT,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_NONE, 0, 150, 1, 100, 0, 0, 1
+        TECH_NONE, 0, 150, 1, 100, 0, 0, 1, 6
     },
     {
         ITEM_UFO_NAV, "UFO.NAV", "UFO NAVIGATION CONSOLE", ICAT_ARTIFACT,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_UFO_NAVIGATION, 0, 800, 0, 0, 0, 0, 2
+        TECH_UFO_NAVIGATION, 0, 800, 0, 0, 0, 0, 2, 8
     },
     {
         ITEM_UFO_CRYO, "CRYO.PD", "ALIEN CRYO-CHAMBER", ICAT_ARTIFACT,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_UFO_CONSTRUCTION, 0, 950, 0, 0, 0, 0, 2
+        TECH_UFO_CONSTRUCTION, 0, 950, 0, 0, 0, 0, 2, 10
     },
     {
         ITEM_UFO_POD, "TECH.PD", "ALIEN ORDNANCE POD", ICAT_ARTIFACT,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_UFO_CONSTRUCTION, 0, 1100, 0, 0, 0, 0, 2
+        TECH_UFO_CONSTRUCTION, 0, 1100, 0, 0, 0, 0, 2, 9
     },
     {
         ITEM_CORPSE_SECTOID, "SECTOID", "SECTOID CORPSE", ICAT_CORPSE,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_AUTOPSY_SECTOID, 0, 350, 0, 0, 0, 0, 2
+        TECH_AUTOPSY_SECTOID, 0, 350, 0, 0, 0, 0, 2, 14
     },
     {
         ITEM_CORPSE_FLOATER, "FLOATER", "FLOATER CORPSE", ICAT_CORPSE,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_AUTOPSY_FLOATER, 0, 450, 0, 0, 0, 0, 2
+        TECH_AUTOPSY_FLOATER, 0, 450, 0, 0, 0, 0, 2, 16
     },
     {
         ITEM_CORPSE_MUTON, "MUTON", "MUTON CORPSE", ICAT_CORPSE,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_AUTOPSY_MUTON, 0, 650, 0, 0, 0, 0, 3
+        TECH_AUTOPSY_MUTON, 0, 650, 0, 0, 0, 0, 3, 22
     }
 };
 
@@ -364,6 +364,47 @@ int item_is_ammo(int item_id) {
 int item_is_grenade(int item_id) {
     if (item_id < 0 || item_id >= ITEM_COUNT) return 0;
     return (item_defs[item_id].category == ICAT_GRENADE);
+}
+
+int item_fits_hand(int item_id) {
+    if (item_id < 0 || item_id >= ITEM_COUNT) return 0;
+    return (item_defs[item_id].category <= ICAT_UTILITY);
+}
+
+int item_fits_small_belt(int item_id) {
+    switch (item_id) {
+        case ITEM_PISTOL_CLIP:
+        case ITEM_RIFLE_MAG:
+        case ITEM_LASER_BATTERY:
+        case ITEM_PLASMA_PISTOL_CLIP:
+        case ITEM_PLASMA_RIFLE_CLIP:
+        case ITEM_FRAG_GRENADE:
+        case ITEM_ALIEN_GRENADE:
+        case ITEM_FLARE:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+int item_fits_large_belt(int item_id) {
+    if (item_fits_small_belt(item_id)) return 1;
+    switch (item_id) {
+        case ITEM_HEAVY_MAG:
+        case ITEM_HEAVY_LASER_PAK:
+        case ITEM_HEAVY_PLASMA_CLIP:
+        case ITEM_HEAVY_GRENADE:
+        case ITEM_PISTOL:
+        case ITEM_LASER_PISTOL:
+        case ITEM_PLASMA_PISTOL:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+int item_fits_backpack(int item_id) {
+    return (item_id >= 0 && item_id < ITEM_COUNT);
 }
 
 int item_legacy_weapon_class(int item_id) {

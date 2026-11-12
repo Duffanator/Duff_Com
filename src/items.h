@@ -106,6 +106,7 @@ typedef struct {
     int mfg_alloys;             /* Alien Alloys required to manufacture 1 unit */
     int mfg_elerium;            /* Elerium-115 required to manufacture 1 unit */
     int store_space;            /* Storage units consumed in Base Stores / ARV Cargo */
+    int weight;                 /* Tactical encumbrance weight (reduces stamina & scales move TUs) */
 } ItemDef;
 
 typedef struct {
@@ -140,6 +141,10 @@ const TechDef *tech_get_def(int tech_id);
 int item_is_weapon(int item_id);
 int item_is_ammo(int item_id);
 int item_is_grenade(int item_id);
+int item_fits_hand(int item_id);
+int item_fits_small_belt(int item_id);
+int item_fits_large_belt(int item_id);
+int item_fits_backpack(int item_id);
 int item_legacy_weapon_class(int item_id); /* Maps any weapon to 0=Ballistic, 1=Laser, 2=Plasma */
 
 /* Roll a randomized starting weapon + ammo + grenade loadout for an alien race (1=Sectoid, 2=Floater, 3=Muton) */
