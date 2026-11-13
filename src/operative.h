@@ -4,7 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MAX_SQUAD_SIZE     5
+#define START_SQUAD_SIZE   5   /* Initial 5 operatives at campaign start */
+#define MAX_SQUAD_SIZE     8   /* Up to 8 operatives can be assigned to the ARV for missions */
+#define MAX_ROSTER_SIZE    16  /* Up to 16 operatives can be housed at HQ (Living Quarters) */
 #define MAX_RECRUIT_POOL   8   /* Ready for HQ "Hire Operatives" Barracks UI */
 #define MAX_MEMORIAL       64  /* Persistent KIA Memorial Wall capacity */
 #define OP_NAME_LEN        16  /* Base operative callsign/surname without rank prefix */
@@ -27,21 +29,24 @@ enum {
 #define XP_KILL_SECTOID     20  /* Eliminating a Sectoid */
 #define XP_KILL_FLOATER     25  /* Eliminating a Floater */
 #define XP_KILL_MUTON       35  /* Eliminating a Muton */
+#define XP_KILL_CRYPTID     50  /* Eliminating a Cryptid or Zombie */
 #define XP_MISSION_VICTORY  45  /* Surviving a victorious mission */
 #define XP_NIGHT_BONUS      10  /* Extra survival XP for Night Ops victory */
 #define XP_MISSION_RETREAT  15  /* Surviving a contested tactical retreat */
 
 typedef struct {
-    int active;             /* 1 = active operative, 0 = empty slot */
+    int active;             /* 1 = active hired operative, 0 = empty berth */
+    int assigned_arv;       /* 1 = assigned to ARV strike team (max 8), 0 = HQ reserve/training */
     char name[OP_NAME_LEN]; /* Clean callsign/surname without rank prefix (e.g. "KELLER") */
     int gender;             /* 0 = Male, 1 = Female */
     int portrait_id;        /* 0..5 Male portraits, 6..11 Female portraits */
     int weapon_id;          /* ITEM_* primary weapon ID (starts with ITEM_ASSAULT_RIFLE or ITEM_PISTOL) */
-    int sidearm_id;         /* Optional secondary weapon ID (e.g. ITEM_PISTOL or ITEM_NONE) */
+    int sidearm_id;         /* Optional secondary weapon ID (e.g. ITEM_PISTOL, ITEM_STUN_ROD, ITEM_MEDKIT) */
     int extra_clips;        /* Number of spare magazines/batteries/cartridges carried (0..4) */
-    int grenade_id;         /* ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE, or ITEM_ALIEN_GRENADE */
+    int grenade_id;         /* ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE, ITEM_STUN_GRENADE, or ITEM_ALIEN_GRENADE */
     int grenades;           /* Number of grenades carried (0..4) */
     int flares;             /* Number of night electro-flares carried (0..3) */
+    int special_id;         /* Special gear carried: ITEM_MEDKIT, ITEM_MIND_PROBE, ITEM_STUN_ROD, or ITEM_NONE */
 
     int rank;               /* RANK_ROOKIE (0) .. RANK_COMMANDER (5) */
     int xp;                 /* Cumulative experience points */
@@ -55,6 +60,12 @@ typedef struct {
     int firing_acc;         /* Base Aim / Firing Accuracy % */
     int throw_acc;          /* Base Throwing Accuracy % (for grenades & throwing gear) */
     int reactions;          /* Base Reaction Fire initiative */
+    int bravery;            /* Base Morale Resilience (40..90) */
+
+    /* Psionic Potential (Hidden until Psi-Training in Psi-Lab is completed!) */
+    int psi_skill;          /* Hidden random Psionic Skill (30..95) */
+    int psi_trained;        /* 0 = Untrained (hidden), 1 = In Psi-Training (unavailable), 2 = Trained (visible) */
+    int psi_hours_left;     /* Remaining hours of Psi-Training when psi_trained == 1 */
 } Operative;
 
 /* Persistent Fallen Operative Memorial Record */

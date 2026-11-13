@@ -4,11 +4,16 @@
 #include <stdint.h>
 #include "pathfind.h"
 
-#define MAP_W    34
-#define MAP_H    34
-#define MAP_LEVS 3
+#define NORM_MAP_W 34
+#define NORM_MAP_H 34
+#define MAX_MAP_W  48
+#define MAX_MAP_H  48
+#define MAP_LEVS   3
 
-#define MAX_UNITS 24
+#define MAP_W      (g_battle.map_w)
+#define MAP_H      (g_battle.map_h)
+
+#define MAX_UNITS  44
 
 #define MAX_GND_ITEMS   16
 #define INV_BELT_SMALL  4
@@ -55,23 +60,27 @@ typedef struct {
 typedef struct {
     int active;
     int faction;        /* 0 = DUFF-COM, 1 = ALIEN, 2 = CIVILIAN */
-    int unit_type;      /* 0 = Operative, 1 = Sectoid, 2 = Floater, 3 = Muton, 4 = Civilian */
+    int orig_faction;   /* Original faction before Psionic Mind Control */
+    int controlled_by_faction; /* Active controlling faction (for Mind Control) */
+    int unit_type;      /* 0=Operative, 1=Sectoid, 2=Floater, 3=Muton, 4=Civilian, 5=Cryptid, 6=Zombie */
     int sprite_id;      /* Index into spr_units[0..NUM_UNIT_SPRITES-1] */
+    int roster_idx;     /* 0..MAX_ROSTER_SIZE-1 index in g_camp.squad[] for operatives (-1 otherwise) */
     int gender;         /* 0 = Male, 1 = Female */
     char name[20];
     int portrait_id;    /* 0..5 Male portraits, 6..11 Female portraits */
     int weapon_id;      /* ITEM_* primary weapon ID (or legacy 0..2 class) */
     int sidearm_id;     /* ITEM_* secondary weapon ID */
+    int special_id;     /* ITEM_MEDKIT, ITEM_MIND_PROBE, ITEM_STUN_ROD, or ITEM_NONE */
     int ammo;           /* Rounds remaining in current magazine/battery/cartridge */
     int extra_clips;    /* Spare magazines/batteries/cartridges carried */
-    int grenade_id;     /* ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE, or ITEM_ALIEN_GRENADE */
-    int grenades;       /* High-Explosive grenades remaining */
+    int grenade_id;     /* ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE, ITEM_STUN_GRENADE, or ITEM_ALIEN_GRENADE */
+    int grenades;       /* Grenades remaining */
     int flares;         /* Night Electro-Flares remaining */
     int active_hand;    /* 0 = Right Hand (SLOT_RHAND), 1 = Left Hand (SLOT_LHAND) */
     int rhand_item;     /* ITEM_* held in Right Hand (-1 = empty) */
-    int rhand_ammo;     /* Loaded rounds in Right Hand weapon */
+    int rhand_ammo;     /* Loaded rounds/charges in Right Hand item */
     int lhand_item;     /* ITEM_* held in Left Hand (-1 = empty) */
-    int lhand_ammo;     /* Loaded rounds in Left Hand weapon */
+    int lhand_ammo;     /* Loaded rounds/charges in Left Hand item */
     int belt_small[INV_BELT_SMALL]; /* 4 Compact Belt Pouch slots (-1 = empty) */
     int belt_large[INV_BELT_LARGE]; /* 2 Large Belt Holster/Pouch slots (-1 = empty) */
     int backpack[INV_BACKPACK_SZ];  /* 6 Backpack Grid slots (-1 = empty) */
@@ -80,14 +89,25 @@ typedef struct {
     int dir;            /* 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW */
     int stance;         /* 0=Standing, 1=Kneeling */
     int anim_pose;      /* 0=Stand, 1=Kneel, 2=WalkA, 3=WalkB */
-    int is_corpse;      /* 1=Dead body lying persistently on tile (x,y,z) */
+    int is_corpse;      /* 1=Dead/Unconscious body lying persistently on tile (x,y,z) */
+    int is_unconscious; /* 1=Passed out / stunned (alive! can be revived by Medkit or captured) */
+    int stun_dmg;       /* Accumulated non-lethal stun damage */
+    int bleed_turns;    /* Countdown turns until unconscious operative bleeds out (0=stable) */
     int death_anim;     /* 0=None, 1..4=Active death collapse stage (0..3) */
     int pixel_off_x;    /* Sub-tile pixel offset during smooth walking */
     int pixel_off_y;
     int tu, tu_max;
     int hp, hp_max;
     int energy, energy_max, base_energy_max;
-    int morale;
+    int morale;             /* Current battlefield morale (0..100) */
+    int bravery;            /* Base morale resilience */
+    int breakdown_turns;    /* >0 = Currently in Morale Mental Breakdown */
+    int mind_control_turns; /* >0 = Currently puppeted by Sectoid Commander or Mind Probe */
+    int psi_skill;          /* Psionic Skill (30..95) */
+    int psi_trained;        /* 2 = Completed Psi-Training in HQ Psi-Lab */
+    int alien_rank;         /* Sectoid Rank: 0=Soldier, 1=Navigator, 2=Leader, 3=Commander */
+    int is_zombie;          /* 1 = Infected Zombie host */
+    int is_drone;           /* 0 = No, 1 = Quad-Copter Rifle Drone, 2 = Alloy UFO Plasma Drone */
     int firing_acc;     /* Base firing accuracy % */
     int throw_acc;      /* Base throwing accuracy % */
     int reactions;      /* Reaction Fire initiative stat */
@@ -99,6 +119,10 @@ typedef struct {
 
 
 typedef struct {
+    int map_w, map_h;       /* Active battlefield dimensions: 34x34 normal, 48x48 for Large/Command UFOs */
+    int ufo_class;          /* 0=Scout, 1=Multi-Level Harvester, 2=Large Abductor, 3=Command Dreadnought */
+    int ufo_x0, ufo_y0;     /* UFO bounding box on map */
+    int ufo_x1, ufo_y1;
     int cam_x, cam_y;       /* Screen pixel offset of tile (0,0,0) top-left */
     int view_level;         /* Active camera elevation slice: 0, 1, or 2 */
     int cur_x, cur_y;       /* Hovered isometric tile coordinates */
@@ -107,7 +131,7 @@ typedef struct {
     int roof_cutaway;       /* 1 = Hide roofs/upper levels above view_level or cursor */
     int night_mode;         /* 0 = Daytime Coopersburg, 1 = Night Mission lighting */
     int reserve_mode;       /* 0 = Free Move, 1 = Reserve Snap (12 TU), 2 = Reserve Aimed (20 TU) */
-    int fire_mode;          /* 0 = Move, 1 = Snap, 2 = Aimed, 3 = Auto, 4 = Grenade, 5 = Flare, 6 = Throw Item */
+    int fire_mode;          /* 0=Move, 1=Snap, 2=Aimed, 3=Auto, 4=Grenade, 5=Flare, 6=Throw, 7=Medkit, 8=StunRod, 9=MindProbe */
     int throw_item_id;      /* ITEM_* queued to be thrown when fire_mode == 6 */
     int throw_hand_slot;    /* 0 = Right Hand, 1 = Left Hand queued for throw */
     int throw_prime;        /* -1 = unprimed, 0..6 = fuse timer on thrown item */
@@ -119,6 +143,14 @@ typedef struct {
     int bus_turret_level;   /* 0 = None, 1 = Mk1 Auto-Turret, 2 = Mk2 Upgraded Turret */
     int bus_turret_hp;      /* Structural HP of roof turret (can be disabled if abused!) */
     int bus_turret_cooldown;/* Turns until ARV roof turret can fire again */
+    int bus_turret_dir;     /* 0..7 facing direction of rotating ARV roof turret */
+    int bus_turret_tx;      /* Rear roof tile X of ARV defense turret */
+    int bus_turret_ty;      /* Rear roof tile Y of ARV defense turret */
+    int bus_drone_pad_x;    /* Front roof tile X of ARV drone landing pad */
+    int bus_drone_pad_y;    /* Front roof tile Y of ARV drone landing pad */
+    int bus_drone_type;     /* 0=None, 1=Quad-Copter Rifle Drone, 2=UFO Plasma Drone */
+    int bus_drone_launched; /* 1=Drone has been launched on this mission */
+    int drone_unit_idx;     /* Index in g_units[] of active deployed ARV drone (-1 if none) */
     int bus_camp_turns;     /* Consecutive turns squad stayed inside bus */
     int ufo_core_hits;      /* Cumulative hits on intact OBJ_UFO_CORE (triggers Mini-Nuke!) */
     int walking_active;     /* 1 = Selected unit is currently walking along g_walk_path */
@@ -128,7 +160,10 @@ typedef struct {
     int turn_number;
     int alien_turn_active;
     int mission_ended;      /* 0 = Ongoing, 1 = Victory!, 2 = Squad Wiped */
+    int recent_deaths;      /* Friendly/civilian deaths in recent turns (drives Morale drop) */
     int aliens_killed;
+    int live_aliens_captured;/* Stunned/unconscious aliens captured alive at mission end */
+#define aliens_captured live_aliens_captured
     int elerium_recovered;
     int alloys_recovered;
     int nav_recovered;      /* Intact Alien Navigation / Flight Computers recovered */
@@ -146,7 +181,7 @@ typedef struct {
     uint32_t anim_tick;     /* 70 Hz real-time frame counter for animated smoke & fire */
 } BattleState;
 
-extern MapCell g_map[MAP_LEVS][MAP_H][MAP_W];
+extern MapCell g_map[MAP_LEVS][MAX_MAP_H][MAX_MAP_W];
 extern Unit g_units[MAX_UNITS];
 extern BattleState g_battle;
 extern PathResult g_preview_path;

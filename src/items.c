@@ -7,7 +7,7 @@
 
 uint8_t spr_item_icons[ITEM_COUNT][ITEM_ICON_W * ITEM_ICON_H];
 uint8_t spr_ground_items[ITEM_COUNT][GROUND_ITEM_W * GROUND_ITEM_H];
-uint8_t spr_base_tiles[12][BASE_TILE_W * BASE_TILE_H];
+uint8_t spr_base_tiles[13][BASE_TILE_W * BASE_TILE_H];
 int     has_base_bmp = 0;
 
 
@@ -18,42 +18,47 @@ static const ItemDef item_defs[ITEM_COUNT] = {
         ITEM_PISTOL_CLIP, 12, PROJ_BULLET,
         24, 10, 0,
         10, 68,  16, 105,  18, 36,
-        TECH_NONE, 250, 125, 0, 0, 0, 0, 1, 3
+        2, 0,
+        TECH_NONE, 250, 125, 12, 0, 0, 0, 0, 0, 1, 3
     },
     {
         ITEM_ASSAULT_RIFLE, "A.RIFLE", "5.56MM ASSAULT RIFLE", ICAT_WEAPON,
         ITEM_RIFLE_MAG, 20, PROJ_BULLET,
         32, 14, 0,
         12, 72,  20, 120,  18, 40,
-        TECH_NONE, 550, 275, 0, 0, 0, 0, 2, 7
+        3, 0,
+        TECH_NONE, 550, 275, 16, 0, 0, 0, 0, 0, 2, 7
     },
     {
         ITEM_HEAVY_RIFLE, "HVY.RFL", "7.62MM HEAVY RIFLE", ICAT_WEAPON,
         ITEM_HEAVY_MAG, 15, PROJ_BULLET,
         46, 18, 0,
         15, 68,  24, 125,  22, 35,
-        TECH_NONE, 850, 425, 0, 0, 0, 0, 3, 12
+        4, 0,
+        TECH_NONE, 850, 425, 20, 0, 0, 0, 0, 0, 3, 12
     },
-
 
     /* 2. Human Ballistic Ammo Magazines */
     {
         ITEM_PISTOL_CLIP, "9MM.CLP", "9MM PISTOL CLIP (12)", ICAT_AMMO,
         ITEM_NONE, 12, PROJ_BULLET,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_NONE, 35, 15, 0, 0, 0, 0, 1, 1
+        0, 0,
+        TECH_NONE, 35, 15, 8, 0, 0, 0, 0, 0, 1, 1
     },
     {
         ITEM_RIFLE_MAG, "556.MAG", "5.56MM RIFLE MAG (20)", ICAT_AMMO,
         ITEM_NONE, 20, PROJ_BULLET,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_NONE, 60, 25, 0, 0, 0, 0, 1, 2
+        0, 0,
+        TECH_NONE, 60, 25, 8, 0, 0, 0, 0, 0, 1, 2
     },
     {
         ITEM_HEAVY_MAG, "762.DRM", "7.62MM HEAVY DRUM (15)", ICAT_AMMO,
         ITEM_NONE, 15, PROJ_BULLET,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_NONE, 90, 40, 0, 0, 0, 0, 1, 4
+        0, 0,
+        TECH_NONE, 90, 40, 10, 0, 0, 0, 0, 0, 1, 4
     },
 
     /* 3. Human Thrown Munitions & Utility */
@@ -62,167 +67,297 @@ static const ItemDef item_defs[ITEM_COUNT] = {
         ITEM_NONE, 1, PROJ_BULLET,
         55, 20, 2,
         16, 100, 0, 0, 0, 0,
-        TECH_NONE, 100, 50, 0, 0, 0, 0, 1, 2
+        0, 3,
+        TECH_NONE, 100, 50, 10, 0, 0, 0, 0, 0, 1, 2
     },
     {
         ITEM_HEAVY_GRENADE, "HE.CHRG", "HEAVY HE SATCHEL", ICAT_GRENADE,
         ITEM_NONE, 1, PROJ_BULLET,
         85, 25, 3,
         20, 100, 0, 0, 0, 0,
-        TECH_NONE, 220, 110, 0, 0, 0, 0, 1, 5
+        0, 4,
+        TECH_NONE, 220, 110, 14, 0, 0, 0, 0, 0, 1, 5
     },
     {
         ITEM_FLARE, "E-FLARE", "NIGHT ELECTRO-FLARE", ICAT_UTILITY,
         ITEM_NONE, 1, PROJ_LASER,
         0, 0, 0,
         10, 100, 0, 0, 0, 0,
-        TECH_NONE, 40, 20, 0, 0, 0, 0, 1, 1
+        0, 0,
+        TECH_NONE, 40, 20, 6, 0, 0, 0, 0, 0, 1, 1
     },
 
-    /* 4. Coopersburg Prototype Laser Weapons & Batteries */
+    /* 4. Coopersburg Prototype Laser Weapons & Batteries (Tree: Basic Laser -> Pistol / Rifle / Heavy) */
     {
         ITEM_LASER_PISTOL, "LSR.PST", "LASER PISTOL", ICAT_WEAPON,
         ITEM_LASER_BATTERY, 15, PROJ_LASER,
         38, 14, 0,
         10, 74,  16, 112,  18, 44,
-        TECH_LASER_WEAPONS, 900, 450, 1, 300, 2, 0, 1, 4
+        2, 0,
+        TECH_LASER_PISTOL, 900, 450, 18, 1, 300, 2, 0, 18, 1, 4
     },
     {
         ITEM_LASER_RIFLE, "LSR.RFL", "PROTOTYPE LASER RIFLE", ICAT_WEAPON,
         ITEM_LASER_BATTERY, 12, PROJ_LASER,
         52, 18, 0,
         12, 78,  20, 124,  18, 46,
-        TECH_LASER_WEAPONS, 1400, 700, 1, 500, 4, 0, 2, 8
+        3, 0,
+        TECH_LASER_RIFLE, 1400, 700, 24, 1, 500, 4, 0, 28, 2, 8
     },
     {
         ITEM_HEAVY_LASER, "HVY.LSR", "HEAVY LASER CANNON", ICAT_WEAPON,
         ITEM_HEAVY_LASER_PAK, 8, PROJ_LASER,
         74, 24, 0,
         16, 74,  25, 128,  22, 38,
-        TECH_HEAVY_LASER, 2100, 1050, 1, 800, 6, 0, 3, 14
+        4, 0,
+        TECH_HEAVY_LASER, 2100, 1050, 30, 1, 800, 6, 0, 40, 3, 14
     },
-
     {
         ITEM_LASER_BATTERY, "LSR.BAT", "LASER CELL BATTERY", ICAT_AMMO,
         ITEM_NONE, 12, PROJ_LASER,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_LASER_WEAPONS, 120, 60, 1, 40, 1, 0, 1, 2
+        0, 0,
+        TECH_LASER_PISTOL, 120, 60, 12, 1, 40, 1, 0, 8, 1, 2
     },
     {
         ITEM_HEAVY_LASER_PAK, "HVY.PAK", "HIGH-CAP LASER PACK", ICAT_AMMO,
         ITEM_NONE, 8, PROJ_LASER,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_HEAVY_LASER, 200, 100, 1, 75, 1, 0, 1, 4
+        0, 0,
+        TECH_HEAVY_LASER, 200, 100, 16, 1, 75, 1, 0, 12, 1, 4
     },
 
-    /* 5. Alien Elerium Plasma Weapons, Cartridges & Grenades */
+    /* 5. Alien Elerium Plasma Weapons, Cartridges & Grenades (Tree: Basic Plasma -> Pistol / Rifle / Heavy) */
     {
         ITEM_PLASMA_PISTOL, "PLS.PST", "ALIEN PLASMA PISTOL", ICAT_WEAPON,
         ITEM_PLASMA_PISTOL_CLIP, 15, PROJ_PLASMA,
         52, 18, 0,
         11, 75,  18, 115,  18, 44,
-        TECH_PLASMA_PISTOL, 2200, 1100, 1, 700, 3, 1, 1, 4
+        3, 0,
+        TECH_PLASMA_PISTOL, 0, 1100, 0, 1, 700, 3, 1, 24, 1, 4
     },
     {
         ITEM_PLASMA_RIFLE, "PLS.RFL", "ALIEN PLASMA RIFLE", ICAT_WEAPON,
         ITEM_PLASMA_RIFLE_CLIP, 12, PROJ_PLASMA,
         72, 22, 0,
         12, 80,  20, 126,  18, 48,
-        TECH_PLASMA_RIFLE, 3400, 1700, 1, 1100, 5, 2, 2, 8
+        4, 0,
+        TECH_PLASMA_RIFLE, 0, 1700, 0, 1, 1100, 5, 2, 36, 2, 8
     },
     {
         ITEM_HEAVY_PLASMA, "HVY.PLS", "HEAVY PLASMA CANNON", ICAT_WEAPON,
         ITEM_HEAVY_PLASMA_CLIP, 10, PROJ_PLASMA,
         98, 28, 0,
         15, 78,  23, 130,  20, 50,
-        TECH_HEAVY_PLASMA, 4800, 2400, 1, 1600, 8, 4, 3, 13
+        5, 0,
+        TECH_HEAVY_PLASMA, 0, 2400, 0, 1, 1600, 8, 4, 48, 3, 13
     },
-
     {
         ITEM_PLASMA_PISTOL_CLIP, "PP.CART", "PLASMA PISTOL CLIP", ICAT_AMMO,
         ITEM_NONE, 15, PROJ_PLASMA,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_PLASMA_PISTOL, 350, 175, 1, 120, 1, 1, 1, 1
+        0, 0,
+        TECH_PLASMA_PISTOL, 0, 175, 0, 1, 120, 1, 1, 10, 1, 1
     },
     {
         ITEM_PLASMA_RIFLE_CLIP, "PR.CART", "PLASMA RIFLE CLIP", ICAT_AMMO,
         ITEM_NONE, 12, PROJ_PLASMA,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_PLASMA_RIFLE, 500, 250, 1, 180, 1, 1, 1, 2
+        0, 0,
+        TECH_PLASMA_RIFLE, 0, 250, 0, 1, 180, 1, 1, 14, 1, 2
     },
     {
         ITEM_HEAVY_PLASMA_CLIP, "HP.CORE", "HEAVY PLASMA CORE", ICAT_AMMO,
         ITEM_NONE, 10, PROJ_PLASMA,
         0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_HEAVY_PLASMA, 750, 375, 1, 250, 2, 2, 1, 4
+        0, 0,
+        TECH_HEAVY_PLASMA, 0, 375, 0, 1, 250, 2, 2, 18, 1, 4
     },
     {
         ITEM_ALIEN_GRENADE, "ALN.GRN", "ALIEN PULSE GRENADE", ICAT_GRENADE,
         ITEM_NONE, 1, PROJ_PLASMA,
         110, 30, 3,
         18, 100, 0, 0, 0, 0,
-        TECH_ALIEN_GRENADE, 600, 300, 1, 200, 1, 1, 1, 2
+        0, 3,
+        TECH_ALIEN_GRENADE, 0, 300, 0, 1, 200, 1, 1, 16, 1, 2
     },
 
-    /* 6. Recovered Alien Materials, UFO Subsystems & Corpses (Never Purchasable!) */
+    /* 6. Recovered Alien Materials, UFO Subsystems & Corpses (Sell-Only in Store, Never Purchasable!) */
     {
         ITEM_ELERIUM, "ELERIUM", "ELERIUM-115 POD", ICAT_ARTIFACT,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_NONE, 0, 400, 0, 0, 0, 0, 1, 4
+        0, 0,
+        TECH_NONE, 0, 400, 0, 0, 0, 0, 0, 0, 1, 4
     },
     {
         ITEM_ALLOYS, "ALLOYS", "ALIEN HULL ALLOYS", ICAT_ARTIFACT,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_NONE, 0, 150, 1, 100, 0, 0, 1, 6
+        0, 0,
+        TECH_UFO_CONSTRUCTION, 0, 150, 0, 1, 100, 0, 0, 10, 1, 6
     },
     {
         ITEM_UFO_NAV, "UFO.NAV", "UFO NAVIGATION CONSOLE", ICAT_ARTIFACT,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_UFO_NAVIGATION, 0, 800, 0, 0, 0, 0, 2, 8
+        0, 0,
+        TECH_UFO_NAVIGATION, 0, 800, 0, 0, 0, 0, 0, 0, 2, 8
     },
     {
         ITEM_UFO_CRYO, "CRYO.PD", "ALIEN CRYO-CHAMBER", ICAT_ARTIFACT,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_UFO_CONSTRUCTION, 0, 950, 0, 0, 0, 0, 2, 10
+        0, 0,
+        TECH_UFO_CONSTRUCTION, 0, 950, 0, 0, 0, 0, 0, 0, 2, 10
     },
     {
         ITEM_UFO_POD, "TECH.PD", "ALIEN ORDNANCE POD", ICAT_ARTIFACT,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_UFO_CONSTRUCTION, 0, 1100, 0, 0, 0, 0, 2, 9
+        0, 0,
+        TECH_UFO_CONSTRUCTION, 0, 1100, 0, 0, 0, 0, 0, 0, 2, 9
     },
     {
-        ITEM_CORPSE_SECTOID, "SECTOID", "SECTOID CORPSE", ICAT_CORPSE,
+        ITEM_CORPSE_SECTOID, "C.SECT", "SECTOID CORPSE", ICAT_CORPSE,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_AUTOPSY_SECTOID, 0, 350, 0, 0, 0, 0, 2, 14
+        0, 0,
+        TECH_AUTOPSY_SECTOID, 0, 350, 0, 0, 0, 0, 0, 0, 2, 14
     },
     {
-        ITEM_CORPSE_FLOATER, "FLOATER", "FLOATER CORPSE", ICAT_CORPSE,
+        ITEM_CORPSE_FLOATER, "C.FLOAT", "FLOATER CORPSE", ICAT_CORPSE,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_AUTOPSY_FLOATER, 0, 450, 0, 0, 0, 0, 2, 16
+        0, 0,
+        TECH_AUTOPSY_FLOATER, 0, 450, 0, 0, 0, 0, 0, 0, 2, 16
     },
     {
-        ITEM_CORPSE_MUTON, "MUTON", "MUTON CORPSE", ICAT_CORPSE,
+        ITEM_CORPSE_MUTON, "C.MUTON", "MUTON CORPSE", ICAT_CORPSE,
         ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
-        TECH_AUTOPSY_MUTON, 0, 650, 0, 0, 0, 0, 3, 22
+        0, 0,
+        TECH_AUTOPSY_MUTON, 0, 650, 0, 0, 0, 0, 0, 0, 3, 22
+    },
+    {
+        ITEM_CORPSE_CRYPTID, "C.CRYPT", "CRYPTID CORPSE", ICAT_CORPSE,
+        ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
+        0, 0,
+        TECH_AUTOPSY_CRYPTID, 0, 950, 0, 0, 0, 0, 0, 0, 3, 24
+    },
+
+    /* 7. Captured Live Aliens (Viewable in Inventory & Sell-Only in Store; Require Alien Containment) */
+    {
+        ITEM_LIVE_SECTOID, "L.SECT", "LIVE SECTOID", ICAT_LIVE_ALIEN,
+        ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
+        0, 0,
+        TECH_LIVE_SECTOID, 0, 800, 0, 0, 0, 0, 0, 0, 2, 15
+    },
+    {
+        ITEM_LIVE_SECTOID_CMDR, "L.CMDR", "LIVE SECTOID COMMANDER", ICAT_LIVE_ALIEN,
+        ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
+        0, 0,
+        TECH_LIVE_SECTOID_CMDR, 0, 1800, 0, 0, 0, 0, 0, 0, 2, 15
+    },
+    {
+        ITEM_LIVE_FLOATER, "L.FLOAT", "LIVE FLOATER", ICAT_LIVE_ALIEN,
+        ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
+        0, 0,
+        TECH_LIVE_FLOATER, 0, 1100, 0, 0, 0, 0, 0, 0, 2, 18
+    },
+    {
+        ITEM_LIVE_MUTON, "L.MUTON", "LIVE MUTON", ICAT_LIVE_ALIEN,
+        ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
+        0, 0,
+        TECH_LIVE_MUTON, 0, 1500, 0, 0, 0, 0, 0, 0, 3, 24
+    },
+    {
+        ITEM_LIVE_CRYPTID, "L.CRYPT", "LIVE CRYPTID", ICAT_LIVE_ALIEN,
+        ITEM_NONE, 0, 0,  0, 0, 0,  0, 0, 0, 0, 0, 0,
+        0, 0,
+        TECH_LIVE_CRYPTID, 0, 2400, 0, 0, 0, 0, 0, 0, 3, 26
+    },
+
+    /* 8. Stun Weapons, Field Medkit, Psionic Mind Probe & Autonomous ARV Drones */
+    {
+        ITEM_STUN_ROD, "STUN.RD", "HIGH-VOLTAGE STUN ROD", ICAT_WEAPON,
+        ITEM_NONE, 99, PROJ_LASER,
+        45, 25, 0,
+        12, 95,  16, 100,  0, 0,
+        0, 0,
+        TECH_NONE, 380, 190, 14, 0, 0, 0, 0, 0, 1, 4
+    },
+    {
+        ITEM_STUN_GRENADE, "STUN.GR", "CONCUSSION STUN GRENADE", ICAT_GRENADE,
+        ITEM_NONE, 1, PROJ_LASER,
+        55, 25, 2,
+        16, 100, 0, 0, 0, 0,
+        0, 3,
+        TECH_NONE, 160, 80, 12, 0, 0, 0, 0, 0, 1, 2
+    },
+    {
+        ITEM_MEDKIT, "MEDKIT", "FIELD TRAUMA MEDKIT", ICAT_UTILITY,
+        ITEM_NONE, 5, PROJ_LASER,
+        18, 12, 0,
+        10, 100, 0, 0, 0, 0,
+        0, 0,
+        TECH_MEDKIT, 450, 225, 14, 1, 180, 0, 0, 14, 1, 3
+    },
+    {
+        ITEM_MIND_PROBE, "M.PROBE", "PSIONIC MIND PROBE", ICAT_UTILITY,
+        ITEM_NONE, 10, PROJ_PLASMA,
+        0, 0, 0,
+        20, 100, 0, 0, 0, 0,
+        0, 0,
+        TECH_MIND_PROBE, 0, 1200, 0, 1, 650, 2, 1, 30, 1, 4
+    },
+    {
+        ITEM_QUAD_DRONE, "Q.DRONE", "ARV QUAD-COPTER DRONE", ICAT_UTILITY,
+        ITEM_NONE, 1, PROJ_BULLET,
+        28, 12, 0,
+        12, 75,  18, 110,  16, 40,
+        0, 0,
+        TECH_QUAD_DRONE, 1800, 900, 24, 1, 750, 2, 0, 32, 3, 10
+    },
+    {
+        ITEM_UFO_DRONE, "U.DRONE", "ALLOY UFO PLASMA DRONE", ICAT_UTILITY,
+        ITEM_NONE, 1, PROJ_PLASMA,
+        64, 20, 0,
+        12, 84,  18, 124,  16, 50,
+        0, 0,
+        TECH_UFO_DRONE, 0, 2200, 0, 1, 1400, 6, 2, 48, 3, 12
     }
 };
 
 
 static const TechDef tech_defs[TECH_COUNT] = {
+    /* --- LASER WEAPON TREE (Basic Theory -> Pistol, Rifle, Heavy, Laser Turret) --- */
     {
-        TECH_LASER_WEAPONS, "LASER WEAPONRY",
-        TECH_NONE, ITEM_NONE, 40,
-        "UNLOCKS LASER PISTOL, RIFLE & BATTERY",
+        TECH_LASER_WEAPONS, "LASER WEAPONS",
+        TECH_NONE, TECH_NONE, ITEM_NONE, -1, 35,
+        "UNLOCKS LASER WEAPON TREE",
         {
             "FOCUSED SOLID-STATE RUBY/CYAN DIODE ARRAYS.",
-            "ALLOWS DUFF-COM WORKSHOP TO BUILD & RECHARGE",
-            "LASER PISTOLS, PROTOTYPE RIFLES & BATTERIES."
+            "ESTABLISHES THERMAL COHERENCE PRINCIPLES TO",
+            "DEVELOP PISTOLS, RIFLES, HEAVY & TURRET LASERS."
+        }
+    },
+    {
+        TECH_LASER_PISTOL, "LASER PISTOL",
+        TECH_LASER_WEAPONS, TECH_NONE, ITEM_NONE, -1, 40,
+        "LASER PISTOL & CELL BATTERY",
+        {
+            "LIGHTWEIGHT COOPERSBURG LASER SIDEARM.",
+            "ALLOWS DUFF-COM WORKSHOP & STORE TO SUPPLY",
+            "LASER PISTOLS AND RECHARGEABLE LASER CELLS."
+        }
+    },
+    {
+        TECH_LASER_RIFLE, "LASER RIFLE",
+        TECH_LASER_WEAPONS, TECH_NONE, ITEM_NONE, -1, 50,
+        "PROTOTYPE LASER INFANTRY RIFLE",
+        {
+            "PRIMARY THERMAL PULSE INFANTRY RIFLE.",
+            "HIGH ACCURACY AND ARMOR PENETRATION USING",
+            "STANDARD COMPACT LASER CELL BATTERIES."
         }
     },
     {
         TECH_HEAVY_LASER, "HEAVY LASER CANNON",
-        TECH_LASER_WEAPONS, ITEM_NONE, 60,
-        "UNLOCKS HEAVY LASER & HIGH-CAP PACK",
+        TECH_LASER_RIFLE, TECH_NONE, ITEM_NONE, -1, 65,
+        "HEAVY LASER & HIGH-CAP PACK",
         {
             "TRIPLE-CAPACITOR HIGH-OUTPUT THERMAL EMITTER.",
             "PUNCHES CLEAN THROUGH BRICK AND SAUCER HULLS.",
@@ -230,9 +365,31 @@ static const TechDef tech_defs[TECH_COUNT] = {
         }
     },
     {
-        TECH_PLASMA_PISTOL, "ALIEN PLASMA PISTOL",
-        TECH_NONE, ITEM_PLASMA_PISTOL, 55,
-        "USE & BUILD PLASMA PISTOL + CARTRIDGE",
+        TECH_ARV_TURRET, "ARV LASER TURRET",
+        TECH_LASER_WEAPONS, TECH_NONE, ITEM_ALLOYS, -1, 70,
+        "UNLOCKS ARV ROOF TURRET MK1",
+        {
+            "ROOF-MOUNTED AUTOMATED LASER TURRET FOR THE",
+            "ARMORED RESPONSE VEHICLE. ROTATES TO TRACK AND",
+            "INTERCEPT ALIENS APPROACHING THE BUS!"
+        }
+    },
+
+    /* --- PLASMA WEAPON TREE (Basic Theory -> Pistol, Rifle, Heavy, Plasma Turret) --- */
+    {
+        TECH_PLASMA_WEAPONS, "PLASMA WEAPONS",
+        TECH_NONE, TECH_NONE, ITEM_ELERIUM, -1, 50,
+        "UNLOCKS PLASMA WEAPON TREE",
+        {
+            "MAGNETIC TOROID CONTAINMENT OF SUPERHEATED",
+            "ELERIUM-PUMPED IONIZED PLASMA. PREREQUISITE",
+            "FOR DECODING ALIEN PLASMA FIREARMS & TURRETS."
+        }
+    },
+    {
+        TECH_PLASMA_PISTOL, "PLASMA PISTOL",
+        TECH_PLASMA_WEAPONS, TECH_NONE, ITEM_PLASMA_PISTOL, -1, 55,
+        "USE & BUILD PLASMA PISTOL + CLIP",
         {
             "COMPACT ELERIUM-PUMPED MAGNETIC PLASMA SIDEARM.",
             "DECODED ALIEN GRIP SAFETY & CONTAINMENT COILS.",
@@ -240,9 +397,9 @@ static const TechDef tech_defs[TECH_COUNT] = {
         }
     },
     {
-        TECH_PLASMA_RIFLE, "ALIEN PLASMA RIFLE",
-        TECH_NONE, ITEM_PLASMA_RIFLE, 75,
-        "USE & BUILD PLASMA RIFLE + CARTRIDGE",
+        TECH_PLASMA_RIFLE, "PLASMA RIFLE",
+        TECH_PLASMA_WEAPONS, TECH_NONE, ITEM_PLASMA_RIFLE, -1, 75,
+        "USE & BUILD PLASMA RIFLE + CLIP",
         {
             "PRIMARY ALIEN INFANTRY ACCELERATOR RIFLE.",
             "FIRES SUPERHEATED IONIZED GREEN PLASMA BOLTS.",
@@ -250,9 +407,9 @@ static const TechDef tech_defs[TECH_COUNT] = {
         }
     },
     {
-        TECH_HEAVY_PLASMA, "HEAVY PLASMA CANNON",
-        TECH_PLASMA_RIFLE, ITEM_HEAVY_PLASMA, 100,
-        "USE & BUILD HEAVY PLASMA + POWER CORE",
+        TECH_HEAVY_PLASMA, "HEAVY PLASMA",
+        TECH_PLASMA_WEAPONS, TECH_PLASMA_RIFLE, ITEM_HEAVY_PLASMA, -1, 100,
+        "USE & BUILD HEAVY PLASMA + CORE",
         {
             "DEVASTATING MUTON-GRADE HEAVY PLASMA WEAPON.",
             "VAPORIZES REINFORCED STEEL & HEAVY ARMOR.",
@@ -260,9 +417,21 @@ static const TechDef tech_defs[TECH_COUNT] = {
         }
     },
     {
-        TECH_ALIEN_GRENADE, "ALIEN PULSE GRENADE",
-        TECH_NONE, ITEM_ALIEN_GRENADE, 50,
-        "USE & BUILD ALIEN ELERIUM GRENADES",
+        TECH_ARV_TURRET_MK2, "ARV PLASMA TURRET",
+        TECH_PLASMA_WEAPONS, TECH_ARV_TURRET, ITEM_UFO_NAV, -1, 90,
+        "UPGRADES ARV TURRET TO MK2 PLASMA",
+        {
+            "INTEGRATES UFO SENSORS & PLASMA ACCELERATORS",
+            "INTO THE ARV ROOF TURRET: +3 TILE RANGE, +20%",
+            "ACCURACY, AND REDUCES COOLDOWN TO 2 TURNS!"
+        }
+    },
+
+    /* --- ORDNANCE, FIELD MEDICINE & AUTONOMOUS ARV DRONES --- */
+    {
+        TECH_ALIEN_GRENADE, "ALIEN GRENADE",
+        TECH_PLASMA_WEAPONS, TECH_NONE, ITEM_ALIEN_GRENADE, -1, 50,
+        "USE & BUILD ALIEN PULSE GRENADES",
         {
             "TIMED ELERIUM-115 MICRO-IMPLOSION CHARGE.",
             "CALIBRATED DETONATOR DIAL FOR HUMAN HANDS.",
@@ -270,8 +439,40 @@ static const TechDef tech_defs[TECH_COUNT] = {
         }
     },
     {
+        TECH_MEDKIT, "FIELD MEDKIT",
+        TECH_NONE, TECH_NONE, ITEM_NONE, -1, 35,
+        "HEALS & REVIVES AGENTS IN COMBAT",
+        {
+            "COOPERSBURG BIO-STIMULANT & HEMOSTATIC KIT.",
+            "HEALS WOUNDED OPERATIVES IN COMBAT AND REVIVES",
+            "UNCONSCIOUS AGENTS BEFORE THEY BLEED OUT!"
+        }
+    },
+    {
+        TECH_QUAD_DRONE, "ARV QUAD-DRONE",
+        TECH_LASER_WEAPONS, TECH_NONE, ITEM_NONE, -1, 60,
+        "QUAD-COPTER RIFLE DRONE & ARV PAD",
+        {
+            "INSTALLS A FRONT ROOF LANDING PAD ON THE ARV.",
+            "DEPLOYS A HOVERING QUAD-COPTER DRONE ARMED WITH",
+            "AN ONBOARD ASSAULT RIFLE FOR SAFE RECON/FIRE!"
+        }
+    },
+    {
+        TECH_UFO_DRONE, "UFO PLASMA DRONE",
+        TECH_QUAD_DRONE, TECH_PLASMA_WEAPONS, ITEM_ALLOYS, -1, 95,
+        "ALLOY UFO PLASMA HOVER-DRONE",
+        {
+            "MINIATURIZED ALIEN GRAV-DISC DRONE LAUNCHED",
+            "FROM THE ARV ROOF PAD. HEAVILY ARMORED AND",
+            "EQUIPPED WITH A LETHAL TWIN PLASMA EMITTER!"
+        }
+    },
+
+    /* --- XENOBIOLOGY: ALIEN AUTOPSIES (Require Corpse) --- */
+    {
         TECH_AUTOPSY_SECTOID, "SECTOID AUTOPSY",
-        TECH_NONE, ITEM_CORPSE_SECTOID, 35,
+        TECH_NONE, TECH_NONE, ITEM_CORPSE_SECTOID, -1, 35,
         "+10% SQUAD AIM VS SECTOIDS",
         {
             "OVERSIZED CRANIAL LOBE WITH FRAGILE RIBCAGE.",
@@ -281,7 +482,7 @@ static const TechDef tech_defs[TECH_COUNT] = {
     },
     {
         TECH_AUTOPSY_FLOATER, "FLOATER AUTOPSY",
-        TECH_NONE, ITEM_CORPSE_FLOATER, 45,
+        TECH_NONE, TECH_NONE, ITEM_CORPSE_FLOATER, -1, 45,
         "+10% SQUAD AIM VS FLOATERS",
         {
             "CYBERNETIC ANTI-GRAVITY UNIT FUSED TO SPINE.",
@@ -291,7 +492,7 @@ static const TechDef tech_defs[TECH_COUNT] = {
     },
     {
         TECH_AUTOPSY_MUTON, "MUTON AUTOPSY",
-        TECH_NONE, ITEM_CORPSE_MUTON, 65,
+        TECH_NONE, TECH_NONE, ITEM_CORPSE_MUTON, -1, 65,
         "+10% SQUAD AIM VS MUTONS",
         {
             "HEAVILY MUSCLED BIO-ARMORED SHOCK TROOPER.",
@@ -300,9 +501,95 @@ static const TechDef tech_defs[TECH_COUNT] = {
         }
     },
     {
+        TECH_AUTOPSY_CRYPTID, "CRYPTID AUTOPSY",
+        TECH_NONE, TECH_NONE, ITEM_CORPSE_CRYPTID, -1, 80,
+        "+10% SQUAD AIM VS CRYPTIDS/ZOMBIES",
+        {
+            "BIO-ENGINEERED TERROR ORGANISM WITH SCYTHE CLAWS.",
+            "INJECTS NEURO-PARASITE THAT TURNS VICTIMS INTO",
+            "HOSTILE ZOMBIES! KEEP AT RANGE AT ALL COSTS."
+        }
+    },
+
+    /* --- XENOBIOLOGY: LIVE INTERROGATIONS (Require Alien Containment = 7 + Live Alien) --- */
+    {
+        TECH_LIVE_SECTOID, "LIVE SECTOID",
+        TECH_NONE, TECH_NONE, ITEM_LIVE_SECTOID, 7, 50,
+        "SECTOID RANK & SQUAD HIERARCHY",
+        {
+            "INTERROGATION OF CAPTURED SECTOID SPECIMEN.",
+            "CONFIRMS TELEPATHIC LINK DIRECTED BY ELITE",
+            "SECTOID COMMANDERS ABOARD COMMAND DREADNOUGHTS."
+        }
+    },
+    {
+        TECH_LIVE_FLOATER, "LIVE FLOATER",
+        TECH_NONE, TECH_NONE, ITEM_LIVE_FLOATER, 7, 60,
+        "FLOATER ASSAULT TELEMETRY DATA",
+        {
+            "INTERROGATION OF CAPTURED FLOATER SPECIMEN.",
+            "CYBERNETIC IMPLANTS RECEIVE ORBITAL TELEMETRY.",
+            "IMPROVES EARLY WARNING RADAR LOCK ACCURACY."
+        }
+    },
+    {
+        TECH_LIVE_MUTON, "LIVE MUTON",
+        TECH_NONE, TECH_NONE, ITEM_LIVE_MUTON, 7, 75,
+        "MUTON HEAVY WEAPON PROTOCOLS",
+        {
+            "INTERROGATION OF CAPTURED MUTON SOLDIER.",
+            "BIO-ENGINEERED WARRIOR CASTE DEPLOYED TO CRUSH",
+            "RESISTANCE BEFORE COMMAND SHIP TOUCHDOWN."
+        }
+    },
+    {
+        TECH_LIVE_CRYPTID, "LIVE CRYPTID",
+        TECH_NONE, TECH_NONE, ITEM_LIVE_CRYPTID, 7, 90,
+        "ANTI-PARASITE BIO-DEFENSE DATA",
+        {
+            "CONTAINMENT ANALYSIS OF LIVE CRYPTID TERROR",
+            "SPECIMEN. EXPOSES PARASITIC ENZYME PATHWAYS",
+            "AND GRANTS BONUS DAMAGE AGAINST ZOMBIE HOSTS."
+        }
+    },
+    {
+        TECH_LIVE_SECTOID_CMDR, "SECTOID COMMANDER",
+        TECH_NONE, TECH_NONE, ITEM_LIVE_SECTOID_CMDR, 7, 95,
+        "UNLOCKS PSIONIC LAB RESEARCH",
+        {
+            "PSIONIC INTERROGATION OF CAPTURED SECTOID",
+            "COMMANDER! MAPS THE TELEPATHIC CORTEX USED TO",
+            "PUPPET HUMAN MINDS. UNLOCKS PSI-LAB RESEARCH!"
+        }
+    },
+
+    /* --- PSIONIC WARFARE TREE (Requires Live Sectoid Commander Interrogation) --- */
+    {
+        TECH_PSI_LAB, "PSIONIC AMP LAB",
+        TECH_LIVE_SECTOID_CMDR, TECH_NONE, ITEM_NONE, 7, 85,
+        "UNLOCKS PSI-LAB BASE FACILITY",
+        {
+            "ADAPTS SECTOID COMMANDER TELEPATHIC RESONATORS",
+            "FOR HUMAN OPERATIVES. CONSTRUCT THE PSI-LAB AT",
+            "HQ TO TRAIN AGENTS & UNCOVER THEIR PSI SKILL!"
+        }
+    },
+    {
+        TECH_MIND_PROBE, "PSIONIC MIND PROBE",
+        TECH_PSI_LAB, TECH_NONE, ITEM_UFO_POD, 12, 80,
+        "UNLOCKS PSIONIC MIND PROBE ITEM",
+        {
+            "HANDHELD PSIONIC WAVE AMPLIFIER & NEURAL LANCE.",
+            "ALLOWS PSI-TRAINED DUFF-COM OPERATIVES TO",
+            "MIND-CONTROL ALIEN FORCES ON THE BATTLEFIELD!"
+        }
+    },
+
+    /* --- UFO ENGINEERING & HULL SYSTEMS --- */
+    {
         TECH_UFO_NAVIGATION, "UFO NAVIGATION",
-        TECH_NONE, ITEM_UFO_NAV, 60,
-        "EARLY RADAR TRACKING & INTERCEPT LOCK",
+        TECH_NONE, TECH_NONE, ITEM_UFO_NAV, -1, 60,
+        "EARLY RADAR TRACKING & INTERCEPT",
         {
             "HYPER-WAVE TELEMETRY & GRAVITY-DRIVE CHARTS.",
             "EXTENDS HOMEMADE RADAR DETECTION RANGE AND",
@@ -311,32 +598,12 @@ static const TechDef tech_defs[TECH_COUNT] = {
     },
     {
         TECH_UFO_CONSTRUCTION, "ARV CARGO EXPANSION",
-        TECH_NONE, ITEM_ALLOYS, 50,
-        "EXPANDS ARMORED BUS GEAR RACK (+14 SLOTS)",
+        TECH_NONE, TECH_NONE, ITEM_ALLOYS, -1, 50,
+        "ARV BUS GEAR RACK (+14 SLOTS)",
         {
             "LIGHTWEIGHT ALIEN ALLOY BRACING & GEAR RACKS",
             "INSTALLED INSIDE THE ARMORED RESPONSE BUS.",
             "DOUBLES VEHICLE WEAPON & AMMO CAPACITY!"
-        }
-    },
-    {
-        TECH_ARV_TURRET, "ARV DEFENSE TURRET",
-        TECH_LASER_WEAPONS, ITEM_ALLOYS, 70,
-        "UNLOCKS BUS ROOF AUTO-TURRET (MK1)",
-        {
-            "ROOF-MOUNTED AUTOMATED DEFENSE TURRET FOR",
-            "THE ARMORED RESPONSE VEHICLE. FIRES AT ALIENS",
-            "APPROACHING THE BUS WITH A 3-TURN COOLDOWN."
-        }
-    },
-    {
-        TECH_ARV_TURRET_MK2, "ARV TURRET MK2 UPGR",
-        TECH_ARV_TURRET, ITEM_UFO_NAV, 90,
-        "UPGRADES BUS TURRET RANGE, ACC & COOLDOWN",
-        {
-            "INTEGRATES UFO TARGETING SENSORS INTO THE BUS",
-            "ROOF TURRET: +3 TILE RANGE, +20% ACCURACY, AND",
-            "REDUCES RECHARGE COOLDOWN TO 2 TURNS!"
         }
     }
 };
@@ -379,6 +646,7 @@ int item_fits_small_belt(int item_id) {
         case ITEM_PLASMA_PISTOL_CLIP:
         case ITEM_PLASMA_RIFLE_CLIP:
         case ITEM_FRAG_GRENADE:
+        case ITEM_STUN_GRENADE:
         case ITEM_ALIEN_GRENADE:
         case ITEM_FLARE:
             return 1;
@@ -397,6 +665,9 @@ int item_fits_large_belt(int item_id) {
         case ITEM_PISTOL:
         case ITEM_LASER_PISTOL:
         case ITEM_PLASMA_PISTOL:
+        case ITEM_STUN_ROD:
+        case ITEM_MEDKIT:
+        case ITEM_MIND_PROBE:
             return 1;
         default:
             return 0;
@@ -420,6 +691,16 @@ void items_roll_alien_loadout(int alien_unit_type, int campaign_day,
     int r = rand() % 100;
     int wep = ITEM_PLASMA_RIFLE;
     int gren_chance = 25;
+
+    if (alien_unit_type == 4 || alien_unit_type == 5) {
+        /* Cryptid & Zombie: Pure biological melee terror units (no ranged firearms!) */
+        if (out_weapon_id)  *out_weapon_id  = ITEM_NONE;
+        if (out_ammo_id)    *out_ammo_id    = ITEM_NONE;
+        if (out_ammo_rds)   *out_ammo_rds   = 0;
+        if (out_grenade_id) *out_grenade_id = ITEM_NONE;
+        if (out_grenades)   *out_grenades   = 0;
+        return;
+    }
 
     if (alien_unit_type == 1) {
         /* Sectoid: 70% Plasma Pistol (early) or 50% later, rest Plasma Rifle */
@@ -473,6 +754,53 @@ void items_init_assets(void) {
             main_c = 9;  trim_c = 20; glow_c = 18;
         }
 
+        if (i == ITEM_STUN_ROD) {
+            /* High-Voltage Stun Baton with arcing blue-white prongs */
+            fill_buf_rect(ico, 32, 16, 4, 6, 24, 5, 15);
+            fill_buf_rect(ico, 32, 16, 5, 7, 7,  3, 11);
+            fill_buf_rect(ico, 32, 16, 12, 7, 12, 3, 68);
+            fill_buf_rect(ico, 32, 16, 24, 6, 3,  1, 80);
+            fill_buf_rect(ico, 32, 16, 24, 10, 3, 1, 80);
+            fill_buf_rect(ico, 32, 16, 26, 7, 2,  3, 2);
+            fill_buf_rect(gnd, 16, 12, 2, 4, 12, 4, 15);
+            fill_buf_rect(gnd, 16, 12, 3, 5, 8,  2, 68);
+            fill_buf_rect(gnd, 16, 12, 11, 5, 2, 2, 80);
+            continue;
+        } else if (i == ITEM_MEDKIT) {
+            /* White/Red Cross Field Trauma Medkit */
+            fill_buf_rect(ico, 32, 16, 9, 2, 14, 12, 15);
+            fill_buf_rect(ico, 32, 16, 10, 3, 12, 10, 2);
+            fill_buf_rect(ico, 32, 16, 15, 5, 2, 6, 33);
+            fill_buf_rect(ico, 32, 16, 13, 7, 6, 2, 33);
+            fill_buf_rect(gnd, 16, 12, 4, 3, 8, 6, 15);
+            fill_buf_rect(gnd, 16, 12, 5, 4, 6, 4, 2);
+            fill_buf_rect(gnd, 16, 12, 7, 4, 2, 4, 33);
+            fill_buf_rect(gnd, 16, 12, 6, 5, 4, 2, 33);
+            continue;
+        } else if (i == ITEM_MIND_PROBE) {
+            /* Psionic Mind Probe with purple/cyan neural dish */
+            fill_buf_rect(ico, 32, 16, 8, 2, 16, 12, 15);
+            fill_buf_rect(ico, 32, 16, 9, 5, 10, 6, 132);
+            fill_buf_rect(ico, 32, 16, 19, 3, 4, 10, 81);
+            fill_buf_rect(ico, 32, 16, 11, 7, 6, 2, 96);
+            fill_buf_rect(gnd, 16, 12, 3, 3, 10, 6, 15);
+            fill_buf_rect(gnd, 16, 12, 4, 4, 6, 4, 132);
+            fill_buf_rect(gnd, 16, 12, 10, 4, 2, 4, 81);
+            continue;
+        } else if (i == ITEM_QUAD_DRONE || i == ITEM_UFO_DRONE) {
+            uint8_t dc = (i == ITEM_UFO_DRONE) ? 132 : 22;
+            uint8_t gc = (i == ITEM_UFO_DRONE) ? 18  : 80;
+            fill_buf_rect(ico, 32, 16, 6, 3, 20, 10, 15);
+            fill_buf_rect(ico, 32, 16, 10, 5, 12, 6, dc);
+            fill_buf_rect(ico, 32, 16, 7, 4, 5, 2, 6);
+            fill_buf_rect(ico, 32, 16, 20, 4, 5, 2, 6);
+            fill_buf_rect(ico, 32, 16, 14, 7, 4, 2, gc);
+            fill_buf_rect(gnd, 16, 12, 3, 3, 10, 6, 15);
+            fill_buf_rect(gnd, 16, 12, 4, 4, 8, 4, dc);
+            fill_buf_rect(gnd, 16, 12, 7, 5, 2, 2, gc);
+            continue;
+        }
+
         switch (d->category) {
             case ICAT_WEAPON: {
                 int is_pistol = (i == ITEM_PISTOL || i == ITEM_LASER_PISTOL || i == ITEM_PLASMA_PISTOL);
@@ -508,7 +836,10 @@ void items_init_assets(void) {
 
             case ICAT_GRENADE:
             case ICAT_UTILITY: {
-                uint8_t gc = (i == ITEM_FLARE) ? 96 : (i == ITEM_ALIEN_GRENADE ? 18 : (i == ITEM_HEAVY_GRENADE ? 34 : 21));
+                uint8_t gc = (i == ITEM_FLARE) ? 96 :
+                             (i == ITEM_STUN_GRENADE) ? 81 :
+                             (i == ITEM_ALIEN_GRENADE ? 18 :
+                             (i == ITEM_HEAVY_GRENADE ? 34 : 21));
                 fill_buf_rect(ico, 32, 16, 11, 3, 10, 10, 15);
                 fill_buf_rect(ico, 32, 16, 12, 4, 8,  8,  gc);
                 fill_buf_rect(ico, 32, 16, 14, 2, 4,  2,  98);
@@ -516,9 +847,28 @@ void items_init_assets(void) {
                 fill_buf_rect(gnd, 16, 12, 6, 4, 4, 4, gc);
                 break;
             }
+            case ICAT_LIVE_ALIEN: {
+                uint8_t sc = (i == ITEM_LIVE_SECTOID_CMDR) ? 96 :
+                             (i == ITEM_LIVE_CRYPTID) ? 33 :
+                             (i == ITEM_LIVE_MUTON) ? 18 :
+                             (i == ITEM_LIVE_FLOATER) ? 113 : 8;
+                /* Glowing Stasis Tube with Live Specimen */
+                fill_buf_rect(ico, 32, 16, 7, 1, 18, 14, 15);
+                fill_buf_rect(ico, 32, 16, 8, 2, 16, 12, 72);
+                fill_buf_rect(ico, 32, 16, 12, 4, 8, 8, sc);
+                fill_buf_rect(ico, 32, 16, 8, 2, 16, 2, 81);
+                fill_buf_rect(ico, 32, 16, 8, 12, 16, 2, 81);
+                fill_buf_rect(gnd, 16, 12, 3, 2, 10, 8, 15);
+                fill_buf_rect(gnd, 16, 12, 4, 3, 8, 6, sc);
+                break;
+            }
             default: {
                 uint8_t ac = (i == ITEM_ELERIUM) ? 113 : (i == ITEM_ALLOYS ? 7 : 80);
-                if (d->category == ICAT_CORPSE) ac = 20;
+                if (d->category == ICAT_CORPSE) {
+                    ac = (i == ITEM_CORPSE_CRYPTID) ? 35 :
+                         (i == ITEM_CORPSE_MUTON) ? 20 :
+                         (i == ITEM_CORPSE_FLOATER) ? 38 : 8;
+                }
                 fill_buf_rect(ico, 32, 16, 8, 2, 16, 12, 15);
                 fill_buf_rect(ico, 32, 16, 9, 3, 14, 10, ac);
                 fill_buf_rect(ico, 32, 16, 11, 5, 10, 4, glow_c);
@@ -552,9 +902,17 @@ void items_init_assets(void) {
             free(sheet);
         }
 
+        /* Populate default Psi-Lab base tile sprite (slot 12) before loading BASE.BMP */
+        fill_buf_rect(spr_base_tiles[12], BASE_TILE_W, BASE_TILE_H, 0, 0, BASE_TILE_W, BASE_TILE_H, 23);
+        fill_buf_rect(spr_base_tiles[12], BASE_TILE_W, BASE_TILE_H, 8, 12, 38, 16, 134);
+        fill_buf_rect(spr_base_tiles[12], BASE_TILE_W, BASE_TILE_H, 12, 6, 30, 12, 131);
+        fill_buf_rect(spr_base_tiles[12], BASE_TILE_W, BASE_TILE_H, 18, 4, 18, 14, 128);
+        fill_buf_rect(spr_base_tiles[12], BASE_TILE_W, BASE_TILE_H, 22, 8, 10, 8, 80);
+        fill_buf_rect(spr_base_tiles[12], BASE_TILE_W, BASE_TILE_H, 26, 11, 2, 2, 96);
+
         sheet = bmp_load_alloc("BASE.BMP", &sw, &sh);
         if (sheet) {
-            for (i = 0; i < 12 && (i + 1) * BASE_TILE_W <= sw && sh >= BASE_TILE_H; i++) {
+            for (i = 0; i < 13 && (i + 1) * BASE_TILE_W <= sw && sh >= BASE_TILE_H; i++) {
                 bmp_extract_tile(sheet, sw, sh, i * BASE_TILE_W, 0,
                                  BASE_TILE_W, BASE_TILE_H, spr_base_tiles[i]);
             }

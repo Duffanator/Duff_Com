@@ -20,6 +20,7 @@ enum {
     FAC_UPG_WORKSHOP,       /* Addon: Upgraded Workshop (Alloy/Elerium Fab) */
     FAC_MISSILE_DEF,        /* Addon: Missile Defense System (UFO Interception) */
     FAC_OFFENSE_SYS,        /* Addon: Heavy Offensive UFO System (High-Dmg AA) */
+    FAC_PSI_LAB,            /* Addon: Psionic Amplification Lab (Psi-Training & Mind Probe) */
     FAC_COUNT
 };
 
@@ -53,6 +54,17 @@ typedef struct {
     const char *intel_desc; /* Local emergency report (<= 33 chars) */
 } RadarEvent;
 
+#define MAX_MODAL_QUEUE 8
+
+typedef struct {
+    char title[32];
+    char line1[44];
+    char line2[44];
+    char line3[44];
+    uint8_t accent_col;
+    uint8_t sfx_type;
+} ModalAlert;
+
 typedef struct {
     int mode;               /* 0 = Command Center (Radar/Bunker/Armory), 1 = Tactical Battlescape */
     int active_tab;         /* 0 = Lehigh Valley Radar, 1 = Colonial House Base, 2 = Squad Armory */
@@ -68,17 +80,26 @@ typedef struct {
     int total_map_damage;       /* Career structural collateral damage */
     int total_score;            /* Cumulative Duff-COM campaign score */
 
-    /* Phase 1: Money, Scientists, Stores, ARV Cargo & Research State */
+    /* Phase 1: Money, Scientists, Engineers, Stores, ARV Cargo & Research State */
     int money;              /* Duff-COM funds in dollars ($12,000 at start) */
     int scientists;         /* Total scientists at base (starts at 2) */
-    int active_tech;        /* Currently researched TECH_* topic (-1 if none) */
-    uint8_t tech_done[TECH_COUNT];  /* 1 = Research completed & logged */
-    int tech_prog[TECH_COUNT];      /* Accumulated scientist-hours per topic */
-    uint8_t item_seen[ITEM_COUNT];  /* 1 = Item has been collected at least once or researched */
-    int stores[ITEM_COUNT];         /* Base Equipment Store inventory counts */
+    int engineers;          /* Total workshop engineers at base (starts at 2) */
+    int active_tech;        /* Currently highlighted TECH_* topic (-1 if none) */
+    uint8_t tech_scientists[TECH_COUNT]; /* Scientists assigned per research topic */
+    uint8_t tech_done[TECH_COUNT];       /* 1 = Research completed & logged */
+    int tech_prog[TECH_COUNT];           /* Accumulated scientist-hours per topic */
+    uint8_t item_seen[ITEM_COUNT];       /* 1 = Item has been collected at least once or researched */
+    int stores[ITEM_COUNT];              /* Base Equipment Store inventory counts */
+
+    /* Workshop Timed Manufacturing & Quartermaster Store Delivery Transit */
+    uint8_t mfg_queue[ITEM_COUNT];       /* Number of units queued for Workshop manufacture */
+    int     mfg_prog[ITEM_COUNT];        /* Accumulated engineer-hours toward current unit */
+    uint8_t store_transit_qty[ITEM_COUNT]; /* Purchased units currently in transit to HQ */
+    uint8_t store_transit_hrs[ITEM_COUNT]; /* Hours remaining until Store delivery arrives */
 
     int arv_cargo[ITEM_COUNT];      /* Weapons/Ammo/Gear loaded into Armored Response Vehicle */
     int arv_turret_level;           /* 0 = None, 1 = Mk1 Roof Auto-Turret, 2 = Mk2 Upgraded Turret */
+    int arv_drone_item;             /* ITEM_NONE, ITEM_QUAD_DRONE, or ITEM_UFO_DRONE on front ARV pad */
 
     int elerium;
     int alloys;
@@ -86,13 +107,22 @@ typedef struct {
     int cryo_pods;          /* Recovered intact Alien Cryo-Stasis Chambers */
     int tech_pods;          /* Recovered intact Alien Tech / Ordnance Pods */
     int alien_corpses;      /* Recovered Alien Corpses in HQ Vault */
-    Operative squad[MAX_SQUAD_SIZE];         /* Active 5-agent strike squad */
+    int debrief_live_captured;        /* Live aliens captured on last mission */
+    int debrief_died_no_containment;  /* Captured aliens that died due to missing Alien Containment */
+
+    Operative squad[MAX_ROSTER_SIZE];        /* Up to 16 HQ operatives (up to 8 assigned to ARV) */
     Operative recruit_pool[MAX_RECRUIT_POOL];/* Ready-to-hire rookie pool for replacements/barracks */
     MemorialEntry memorial[MAX_MEMORIAL];    /* Persistent KIA Memorial Wall */
     int memorial_count;
-    int selected_soldier;   /* Highlighted operative in 3.SQUAD ARMORY (0..4) */
+    int selected_soldier;   /* Highlighted operative in 3.SQUAD ARMORY (0..MAX_ROSTER_SIZE-1) */
     int bunker_grid[3][4];  /* 3 rows x 4 cols Coopersburg Colonial House Base grid */
     char notice[48];
+
+    /* Command Center Event Modal Popup Queue & Animation State */
+    ModalAlert modal_queue[MAX_MODAL_QUEUE];
+    int modal_count;
+    int modal_open;         /* 0=closed, 1=opening anim, 2=open waiting for ack, 3=closing anim */
+    int modal_anim_frame;   /* Animation progress frame (0..8) */
 
     /* Lehigh Valley Radar & Random Alien Event System */
     RadarEvent events[MAX_RADAR_EVENTS];
@@ -132,9 +162,6 @@ typedef struct {
 } CampaignState;
 
 
-
-
-
 extern CampaignState g_camp;
 
 void campaign_init(void);
@@ -143,6 +170,19 @@ void campaign_tick(void);
 void campaign_on_mission_complete(void);
 void campaign_render(void);
 void campaign_handle_input(void);
+
+/* Command Center Modal Alert Helpers */
+void campaign_push_modal(const char *title, const char *l1, const char *l2, const char *l3,
+                         uint8_t accent_col, uint8_t sfx_type);
+int  campaign_has_facility(int fac_type);
+int  campaign_count_facility(int fac_type);
+int  campaign_can_research_tech(int tech_id);
+int  campaign_assigned_scientists(void);
+int  campaign_free_scientists(void);
+int  campaign_total_personnel(void);
+int  campaign_max_personnel(void);
+int  campaign_count_arv_squad(void);
+int  campaign_count_hired_operatives(void);
 
 /* Phase 1 Helper Queries for Research, Stores & ARV Capacity */
 int  campaign_is_item_researched(int item_id);

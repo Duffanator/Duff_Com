@@ -80,7 +80,7 @@ uint8_t *bmp_load_alloc(const char *name, int *out_w, int *out_h) {
     memcpy(&bpp,         &hdr[28], 2);
     memcpy(&compression, &hdr[30], 4);
 
-    if (width <= 0 || width > 2048 || height == 0 || abs(height) > 2048 || compression != 0) {
+    if (width <= 0 || width > 4096 || height == 0 || abs(height) > 4096 || compression != 0) {
         fclose(fp);
         return NULL;
     }

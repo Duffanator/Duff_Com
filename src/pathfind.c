@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define TOTAL_NODES (MAP_LEVS * MAP_H * MAP_W)
-#define NODE_IDX(x, y, z) (((z) * MAP_H + (y)) * MAP_W + (x))
+#define TOTAL_NODES (MAP_LEVS * MAX_MAP_H * MAX_MAP_W)
+#define NODE_IDX(x, y, z) (((z) * MAX_MAP_H + (y)) * MAX_MAP_W + (x))
 
 /* Check if a wall blocks movement across an orthogonal edge; returns 0=blocked, 1=open, 2=closed door */
 static int check_ortho_edge(int x0, int y0, int z, int x1, int y1) {
@@ -156,9 +156,9 @@ int pathfind_compute(int sx, int sy, int sz, int gx, int gy, int gz, int can_fly
             out_path->length = count;
             for (i = 0; i < count; i++) {
                 int node = temp_nodes[count - 1 - i];
-                int nx = node % MAP_W;
-                int ny = (node / MAP_W) % MAP_H;
-                int nz = node / (MAP_W * MAP_H);
+                int nx = node % MAX_MAP_W;
+                int ny = (node / MAX_MAP_W) % MAX_MAP_H;
+                int nz = node / (MAX_MAP_W * MAX_MAP_H);
                 out_path->steps[i].x = (int8_t)nx;
                 out_path->steps[i].y = (int8_t)ny;
                 out_path->steps[i].z = (int8_t)nz;
@@ -168,9 +168,9 @@ int pathfind_compute(int sx, int sy, int sz, int gx, int gy, int gz, int can_fly
             return 1;
         }
 
-        cx = cur % MAP_W;
-        cy = (cur / MAP_W) % MAP_H;
-        cz = cur / (MAP_W * MAP_H);
+        cx = cur % MAX_MAP_W;
+        cy = (cur / MAX_MAP_W) % MAX_MAP_H;
+        cz = cur / (MAX_MAP_W * MAX_MAP_H);
 
         /* Explore 8 horizontal neighbors + 2 vertical (up/down) neighbors */
         for (dir = 0; dir < 10; dir++) {

@@ -153,6 +153,35 @@ static void event_hit_box(const RadarEvent *ev, int *lx_out, int *ly_out,
     *y1 = ev->ry + 8;
 }
 
+/* Queue a Command Center Event Modal Popup, pausing time & dropping speed to 1S! */
+void campaign_push_modal(const char *title, const char *l1, const char *l2, const char *l3,
+                         uint8_t accent_col, uint8_t sfx_type) {
+    ModalAlert *m;
+    g_camp.time_speed = 0; /* Always reset time passage to 1S (Realtime) on event! */
+
+    if (g_camp.modal_count >= MAX_MODAL_QUEUE) {
+        return;
+    }
+    m = &g_camp.modal_queue[g_camp.modal_count++];
+    memset(m, 0, sizeof(*m));
+    if (title) strncpy(m->title, title, sizeof(m->title) - 1);
+    if (l1)    strncpy(m->line1, l1,    sizeof(m->line1) - 1);
+    if (l2)    strncpy(m->line2, l2,    sizeof(m->line2) - 1);
+    if (l3)    strncpy(m->line3, l3,    sizeof(m->line3) - 1);
+    m->accent_col = accent_col ? accent_col : 96;
+    m->sfx_type   = sfx_type;
+
+    if (g_camp.modal_open == 0) {
+        g_camp.modal_open       = 1; /* Start opening window animation */
+        g_camp.modal_anim_frame = 0;
+        if (g_camp.mode == 0) {
+            if (sfx_type == 1)      sfx_alert();
+            else if (sfx_type == 2) sfx_explosion();
+            else { sfx_beep(523, 35); sfx_beep(784, 55); }
+        }
+    }
+}
+
 /* Spawn a new randomized Flying Alien UFO entering Lehigh Valley airspace! */
 static int spawn_random_radar_event(int play_sfx) {
     int slot = -1, i, attempt;
@@ -173,13 +202,13 @@ static int spawn_random_radar_event(int play_sfx) {
     }
     if (slot < 0) return -1;
 
-    /* Roll UFO Size (0=Small Scout, 1=Medium Cruiser, 2=Large Assault Ship) scaled by campaign threat */
+    /* Roll UFO Size (0=Small Scout, 1=Medium Harvester, 2=Large Abductor, 3=Command Ship) */
     if (threat <= 3) {
-        ufo_sz = (size_roll < 80) ? 0 : 1;
-    } else if (threat <= 10) {
-        ufo_sz = (size_roll < 40) ? 0 : (size_roll < 85 ? 1 : 2);
+        ufo_sz = (size_roll < 75) ? 0 : 1;
+    } else if (threat <= 8) {
+        ufo_sz = (size_roll < 35) ? 0 : (size_roll < 78 ? 1 : 2);
     } else {
-        ufo_sz = (size_roll < 20) ? 0 : (size_roll < 60 ? 1 : 2);
+        ufo_sz = (size_roll < 15) ? 0 : (size_roll < 45 ? 1 : (size_roll < 75 ? 2 : 3));
     }
 
     /* Pick initial Lehigh Valley entry vector with clear separation from existing blips & HQ */
@@ -223,7 +252,7 @@ static int spawn_random_radar_event(int play_sfx) {
     ev->ufo_size    = ufo_sz;
     ev->is_flying   = 1;
     ev->severity    = 1;
-    ev->ufo_hp_max  = (ufo_sz == 0) ? 60 : (ufo_sz == 1 ? 120 : 200);
+    ev->ufo_hp_max  = (ufo_sz == 0) ? 60 : (ufo_sz == 1 ? 120 : (ufo_sz == 2 ? 190 : 260));
     ev->ufo_hp      = ev->ufo_hp_max;
     ev->vx          = (rand() & 1) ? 2 : -2;
     ev->vy          = (rand() & 1) ? 1 : -1;
@@ -233,7 +262,8 @@ static int spawn_random_radar_event(int play_sfx) {
     ev->age_ticks   = 0;
     ev->ttl_ticks   = 960;
     ev->type_title  = (ufo_sz == 0) ? "FLYING SCOUT" :
-                      (ufo_sz == 1) ? "FLYING CRUISER" : "FLYING BATTLESHIP";
+                      (ufo_sz == 1) ? "FLYING HARVESTER" :
+                      (ufo_sz == 2) ? "FLYING ABDUCTOR" : "COMMAND DREADNOUGHT";
     ev->loc_name    = valley_sites[chosen_biome][chosen_site].loc_name;
     ev->intel_desc  = "AIRBORNE UFO TRACKED OVER VALLEY";
     update_event_nearest_site(ev);
@@ -242,8 +272,7 @@ static int spawn_random_radar_event(int play_sfx) {
 
     g_camp.last_reported_idx   = slot;
     g_camp.report_banner_timer = 260;
-    /* Auto-drop fast time compression to Realtime (1S) when a new UFO is detected! */
-    g_camp.time_speed = 0;
+    g_camp.time_speed          = 0;
     if (g_camp.selected_event < 0 || !g_camp.events[g_camp.selected_event].active) {
         g_camp.selected_event = slot;
     }
@@ -252,7 +281,11 @@ static int spawn_random_radar_event(int play_sfx) {
              ev->type_title, ev->loc_name);
 
     if (play_sfx && g_camp.mode == 0) {
-        sfx_alert();
+        char l1[44], l2[44];
+        snprintf(l1, sizeof(l1), "CONTACT %s: %s", ev->tag, ev->type_title);
+        snprintf(l2, sizeof(l2), "SECTOR: %s", ev->loc_name);
+        campaign_push_modal("VALLEY RADAR CONTACT!", l1, l2,
+                            "TRACKING BOGEY IN LEHIGH VALLEY AIRSPACE.", 80, 1);
     }
     return slot;
 }
@@ -268,6 +301,77 @@ static int has_facility(int fac_id) {
         }
     }
     return 0;
+}
+
+int campaign_has_facility(int fac_type) {
+    return has_facility(fac_type);
+}
+
+int campaign_count_facility(int fac_type) {
+    int r, c, cnt = 0;
+    for (r = 0; r < 3; r++) {
+        for (c = 0; c < 4; c++) {
+            if (g_camp.bunker_grid[r][c] == fac_type) cnt++;
+        }
+    }
+    return cnt;
+}
+
+int campaign_can_research_tech(int tech_id) {
+    const TechDef *td;
+    if (tech_id < 0 || tech_id >= TECH_COUNT) return 0;
+    if (g_camp.tech_done[tech_id]) return 0;
+    td = tech_get_def(tech_id);
+    if (td->req_tech != TECH_NONE && !g_camp.tech_done[td->req_tech]) return 0;
+    if (td->req_tech2 != TECH_NONE && !g_camp.tech_done[td->req_tech2]) return 0;
+    if (td->req_facility >= 0 && !has_facility(td->req_facility)) return 0;
+    if (td->req_item != ITEM_NONE &&
+        g_camp.stores[td->req_item] <= 0 &&
+        g_camp.arv_cargo[td->req_item] <= 0) {
+        return 0;
+    }
+    return 1;
+}
+
+int campaign_assigned_scientists(void) {
+    int t, sum = 0;
+    for (t = 0; t < TECH_COUNT; t++) {
+        if (!g_camp.tech_done[t]) sum += g_camp.tech_scientists[t];
+    }
+    return sum;
+}
+
+int campaign_free_scientists(void) {
+    int free_s = g_camp.scientists - campaign_assigned_scientists();
+    return (free_s > 0) ? free_s : 0;
+}
+
+int campaign_count_hired_operatives(void) {
+    int i, cnt = 0;
+    for (i = 0; i < MAX_ROSTER_SIZE; i++) {
+        if (g_camp.squad[i].active) cnt++;
+    }
+    return cnt;
+}
+
+int campaign_count_arv_squad(void) {
+    int i, cnt = 0;
+    for (i = 0; i < MAX_ROSTER_SIZE; i++) {
+        if (g_camp.squad[i].active && g_camp.squad[i].assigned_arv &&
+            g_camp.squad[i].psi_trained != 1) {
+            cnt++;
+        }
+    }
+    return cnt;
+}
+
+int campaign_total_personnel(void) {
+    return campaign_count_hired_operatives() + g_camp.scientists + g_camp.engineers;
+}
+
+int campaign_max_personnel(void) {
+    /* Main Colonial House HQ holds 10 berths; each Living Quarters adds +8 berths */
+    return 10 + campaign_count_facility(FAC_QUARTERS) * 8;
 }
 
 
@@ -323,7 +427,7 @@ int campaign_arv_used_space(void) {
 }
 
 int campaign_arv_max_space(void) {
-    return g_camp.tech_done[TECH_UFO_CONSTRUCTION] ? 100 : 75;
+    return g_camp.tech_done[TECH_UFO_CONSTRUCTION] ? 110 : 80;
 }
 
 static int take_arv_or_base_item(int id) {
@@ -332,7 +436,7 @@ static int take_arv_or_base_item(int id) {
         g_camp.arv_cargo[id]--;
         return 1;
     }
-    if (g_battle.biome_id == BIOME_BASE_DEFENSE && g_camp.stores[id] > 0) {
+    if (g_camp.stores[id] > 0) {
         g_camp.stores[id]--;
         return 1;
     }
@@ -357,17 +461,50 @@ void campaign_sync_squad_units(void) {
         ITEM_ASSAULT_RIFLE, ITEM_HEAVY_RIFLE, ITEM_PLASMA_PISTOL, ITEM_LASER_PISTOL, ITEM_PISTOL
     };
     static const int gren_prio[] = {
-        ITEM_ALIEN_GRENADE, ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE
+        ITEM_ALIEN_GRENADE, ITEM_STUN_GRENADE, ITEM_FRAG_GRENADE, ITEM_HEAVY_GRENADE
     };
-    int i, k;
+    int r, k, slot = 0;
     int bonus_hp = has_facility(FAC_MEDBAY) ? 15 : 0;
     int bonus_tu = has_facility(FAC_ARCADE_REC) ? 6 : 0;
 
-    for (i = 0; i < MAX_SQUAD_SIZE; i++) {
-        const Operative *op = &g_camp.squad[i];
-        Unit *u = &g_units[i];
-        int wep = (item_is_weapon(op->weapon_id) && campaign_is_item_researched(op->weapon_id))
-                  ? op->weapon_id : ITEM_ASSAULT_RIFLE;
+    /* Clear all 8 squad unit slots first */
+    for (slot = 0; slot < MAX_SQUAD_SIZE; slot++) {
+        if (g_camp.mode == 1 &&
+            (unsigned)g_units[slot].x < MAP_W &&
+            (unsigned)g_units[slot].y < MAP_H &&
+            (unsigned)g_units[slot].z < MAP_LEVS &&
+            g_map[g_units[slot].z][g_units[slot].y][g_units[slot].x].unit_idx == slot) {
+            g_map[g_units[slot].z][g_units[slot].y][g_units[slot].x].unit_idx = -1;
+        }
+        g_units[slot].active     = 0;
+        g_units[slot].hp_max     = 0;
+        g_units[slot].hp         = 0;
+        g_units[slot].roster_idx = -1;
+        g_units[slot].name[0]    = '\0';
+    }
+
+    slot = 0;
+    for (r = 0; r < MAX_ROSTER_SIZE && slot < MAX_SQUAD_SIZE; r++) {
+        const Operative *op = &g_camp.squad[r];
+        Unit *u;
+        int wep;
+        int cur_slot;
+
+        if (!op->active || !op->assigned_arv || op->psi_trained == 1) continue;
+
+        cur_slot = slot++;
+        u = &g_units[cur_slot];
+        wep = (item_is_weapon(op->weapon_id) && campaign_is_item_researched(op->weapon_id))
+              ? op->weapon_id : ITEM_ASSAULT_RIFLE;
+        u->active      = 1;
+        if (g_camp.mode == 1 &&
+            (unsigned)u->x < MAP_W && (unsigned)u->y < MAP_H && (unsigned)u->z < MAP_LEVS) {
+            g_map[u->z][u->y][u->x].unit_idx = (int8_t)cur_slot;
+        }
+        u->faction     = FACTION_DUFFCOM;
+        u->orig_faction= FACTION_DUFFCOM;
+        u->unit_type   = 0;
+        u->roster_idx  = r;
         operative_format_full_name(op, u->name, sizeof(u->name));
         u->gender      = op->gender;
         u->portrait_id = op->portrait_id % NUM_PORTRAITS;
@@ -386,7 +523,18 @@ void campaign_sync_squad_units(void) {
         u->firing_acc  = op->firing_acc;
         u->throw_acc   = op->throw_acc;
         u->reactions   = op->reactions;
+        u->bravery     = op->bravery ? op->bravery : 70;
         u->morale      = 100;
+        u->psi_skill   = op->psi_skill;
+        u->psi_trained = op->psi_trained;
+        u->is_corpse      = 0;
+        u->is_unconscious = 0;
+        u->stun_dmg       = 0;
+        u->bleed_turns    = 0;
+        u->breakdown_turns    = 0;
+        u->mind_control_turns = 0;
+        u->is_zombie      = 0;
+        u->is_drone       = 0;
 
         if (g_camp.mode == 1) {
             /* Active Mission Deployment: draw initial operative equipment from ARV Bus Cargo! */
@@ -427,6 +575,22 @@ void campaign_sync_squad_units(void) {
                     }
                 }
             }
+            /* Issue Special Tactical Gear (Medkit, Mind Probe, Stun Rod) if preferred or in cargo */
+            if (op->special_id >= 0 && campaign_is_item_researched(op->special_id) &&
+                take_arv_or_base_item(op->special_id)) {
+                if (!isomap_give_unit_item(u, op->special_id)) {
+                    return_unit_item_to_camp(op->special_id);
+                }
+            } else {
+                if (u->psi_trained == 2 && campaign_is_item_researched(ITEM_MIND_PROBE) &&
+                    take_arv_or_base_item(ITEM_MIND_PROBE)) {
+                    if (!isomap_give_unit_item(u, ITEM_MIND_PROBE)) return_unit_item_to_camp(ITEM_MIND_PROBE);
+                } else if (campaign_is_item_researched(ITEM_MEDKIT) && take_arv_or_base_item(ITEM_MEDKIT)) {
+                    if (!isomap_give_unit_item(u, ITEM_MEDKIT)) return_unit_item_to_camp(ITEM_MEDKIT);
+                } else if (take_arv_or_base_item(ITEM_STUN_ROD)) {
+                    if (!isomap_give_unit_item(u, ITEM_STUN_ROD)) return_unit_item_to_camp(ITEM_STUN_ROD);
+                }
+            }
             for (k = 0; k < (int)(sizeof(gren_prio) / sizeof(gren_prio[0])); k++) {
                 int g_cand = gren_prio[k];
                 if (campaign_is_item_researched(g_cand) && take_arv_or_base_item(g_cand)) {
@@ -446,6 +610,7 @@ void campaign_sync_squad_units(void) {
             /* Startup / Snapshot preview before mission launch: populate slots without depleting ARV cargo */
             u->weapon_id   = wep;
             u->sidearm_id  = op->sidearm_id;
+            u->special_id  = op->special_id;
             u->ammo        = item_get_def(wep)->clip_size;
             u->extra_clips = (op->extra_clips > 0) ? op->extra_clips : 2;
             u->grenade_id  = (op->grenade_id >= 0 && campaign_is_item_researched(op->grenade_id))
@@ -454,6 +619,9 @@ void campaign_sync_squad_units(void) {
             u->flares      = op->flares;
             isomap_init_unit_slots_from_summary(u);
         }
+    }
+    if (g_camp.mode == 1) {
+        isomap_recalc_lighting_and_fov();
     }
 }
 
@@ -471,12 +639,15 @@ void campaign_init(void) {
     g_camp.valley_minute = 13 * 60 + 30; /* 13:30 Daylight in Coopersburg */
     g_camp.deploy_night = 0;
 
-    /* Phase 1 Starting Economy, Scientists, Base Stores & ARV Cargo */
-    g_camp.money       = 12000;
-    g_camp.scientists  = 2;
-    g_camp.active_tech = TECH_LASER_WEAPONS;
-    g_camp.elerium     = 0;
-    g_camp.alloys      = 10;
+    /* Phase 1 Starting Economy, Scientists, Engineers, Base Stores & ARV Cargo */
+    g_camp.money          = 12000;
+    g_camp.scientists     = 2;
+    g_camp.engineers      = 2;
+    g_camp.active_tech    = TECH_LASER_WEAPONS;
+    g_camp.tech_scientists[TECH_LASER_WEAPONS] = 2; /* Assign starting 2 scientists */
+    g_camp.arv_drone_item = ITEM_NONE;
+    g_camp.elerium        = 0;
+    g_camp.alloys         = 10;
 
     g_camp.stores[ITEM_PISTOL]        = 4;
     g_camp.stores[ITEM_ASSAULT_RIFLE] = 4;
@@ -499,10 +670,10 @@ void campaign_init(void) {
     g_camp.arv_cargo[ITEM_HEAVY_GRENADE] = 2;
     g_camp.arv_cargo[ITEM_FLARE]         = 6;
 
-    /* Initialize starting squad (Keller, Decker, Harr, Lucas, Barber) & replacement recruit pool */
-    operative_load_starting_squad(g_camp.squad, MAX_SQUAD_SIZE);
+    /* Initialize starting 5 operatives in the 16-slot HQ roster & replacement recruit pool */
+    operative_load_starting_squad(g_camp.squad, MAX_ROSTER_SIZE);
     operative_refresh_recruit_pool(g_camp.recruit_pool, MAX_RECRUIT_POOL,
-                                   g_camp.squad, MAX_SQUAD_SIZE);
+                                   g_camp.squad, MAX_ROSTER_SIZE);
 
     /* Initial Coopersburg Colonial House Base Layout:
      * Center [1][1] = Main Colonial House HQ
@@ -590,16 +761,21 @@ static void tick_ufo_interception(void) {
 
 static void resolve_flying_ufo_pass(int i, RadarEvent *ev) {
     int has_offense = has_facility(FAC_TURRET);
+    int roll = rand() % 100;
+    char l1[44], l2[44];
     update_event_nearest_site(ev);
 
-    if (!has_offense && (rand() % 100 < 55)) {
+    /* Without base offense: ~32% X-COM shootdown, ~32% Landed UFO, ~36% Flies across & disappears!
+     * With base offense (if player ignored intercept): ~50% Landed UFO, ~50% Flies across & disappears! */
+    if (!has_offense && (roll < 32)) {
         /* Regional X-COM Interceptor shoots down the UFO -> Clean-up Mission! */
         ev->is_flying  = 0;
         ev->severity   = 0;
         ev->age_ticks  = 0;
         ev->ttl_ticks  = 1440;
         ev->type_title = (ev->ufo_size == 0) ? "CRASHED SCOUT" :
-                         (ev->ufo_size == 1) ? "CRASHED CRUISER" : "DOWNED BATTLESHIP";
+                         (ev->ufo_size == 1) ? "CRASHED HARVESTER" :
+                         (ev->ufo_size == 2) ? "CRASHED ABDUCTOR" : "DOWNED COMMAND SHIP";
         ev->intel_desc = "SHOT DOWN BY X-COM - CLEAN UP!";
         snprintf(ev->tag, sizeof(ev->tag), "SITE-%02u", (unsigned)(ev->event_num % 100));
         g_camp.time_speed          = 0;
@@ -607,16 +783,20 @@ static void resolve_flying_ufo_pass(int i, RadarEvent *ev) {
         g_camp.report_banner_timer = 260;
         snprintf(g_camp.notice, sizeof(g_camp.notice),
                  "X-COM SHOT DOWN %s @ %s!", ev->tag, ev->loc_name);
-        if (g_camp.mode == 0) sfx_explosion();
+        snprintf(l1, sizeof(l1), "%s DOWN AT %s", ev->type_title, ev->loc_name);
+        campaign_push_modal("UFO SHOT DOWN BY X-COM!", l1,
+                            "REGIONAL INTERCEPTORS DOWNED THE CRAFT.",
+                            "DEPLOY ARV SQUAD FOR CRASH SITE SALVAGE!", 144, 2);
 
-    } else if (!has_offense || (rand() % 100 < 75)) {
-        /* UFO lands intact -> Aliens are attacking! (Undamaged UFO on ground) */
+    } else if ((!has_offense && roll < 64) || (has_offense && roll < 52)) {
+        /* UFO lands intact -> Aliens are operating on the ground! */
         ev->is_flying  = 0;
         ev->severity   = (rand() % 100 < 40) ? 2 : 1;
         ev->age_ticks  = 0;
         ev->ttl_ticks  = 960;
         ev->type_title = (ev->ufo_size == 0) ? "LANDED SCOUT" :
-                         (ev->ufo_size == 1) ? "LANDED CRUISER" : "ASSAULT LANDING";
+                         (ev->ufo_size == 1) ? "LANDED HARVESTER" :
+                         (ev->ufo_size == 2) ? "LANDED ABDUCTOR" : "LANDED COMMAND SHIP";
         ev->intel_desc = "UFO LANDED INTACT - ALIENS ATTACKING!";
         snprintf(ev->tag, sizeof(ev->tag), "UFO-%02u", (unsigned)(ev->event_num % 100));
         g_camp.time_speed          = 0;
@@ -624,36 +804,154 @@ static void resolve_flying_ufo_pass(int i, RadarEvent *ev) {
         g_camp.report_banner_timer = 260;
         snprintf(g_camp.notice, sizeof(g_camp.notice),
                  "ALERT: %s @ %s!", ev->type_title, ev->loc_name);
-        if (g_camp.mode == 0) sfx_alert();
+        snprintf(l1, sizeof(l1), "%s AT %s", ev->type_title, ev->loc_name);
+        campaign_push_modal("ALIEN UFO TOUCHDOWN!", l1,
+                            "HOSTILE FORCES DEPLOYING IN SECTOR!",
+                            "SELECT CONTACT ON RADAR TO LAUNCH ARV.", 96, 1);
     } else {
+        /* UFO flies straight across the radar screen and disappears without a mission! */
+        snprintf(l1, sizeof(l1), "%s (%s) FLEW PAST VALLEY", ev->tag, ev->type_title);
+        snprintf(l2, sizeof(l2), "LAST TRACKED OVER %s", ev->loc_name);
         ev->active = 0;
+        if (g_camp.selected_event == i) {
+            g_camp.selected_event = first_active_event();
+        }
         snprintf(g_camp.notice, sizeof(g_camp.notice),
-                 "%s LEFT LEHIGH VALLEY AIRSPACE", ev->tag);
+                 "%s FLEW ACROSS VALLEY & ESCAPED!", ev->tag);
+        campaign_push_modal("UFO LEFT VALLEY AIRSPACE!", l1, l2,
+                            has_offense ? "BOGEY ESCAPED BEFORE INTERCEPTION."
+                                        : "BUILD BASE OFFENSE TURRETS TO SHOOT UFOS!", 33, 0);
     }
 }
 
 static void advance_campaign_minutes(int mins) {
-    int m, i;
+    int m, i, t;
     for (m = 0; m < mins; m++) {
+        /* If an Event Modal just popped up, immediately stop advancing further minutes! */
+        if (g_camp.modal_open != 0) break;
+
         g_camp.valley_minute++;
         if (g_camp.valley_minute >= 1440) {
             g_camp.valley_minute = 0;
             g_camp.valley_day++;
         }
 
-        if ((g_camp.valley_minute % 60) == 0 &&
-            g_camp.active_tech >= 0 && g_camp.active_tech < TECH_COUNT &&
-            !g_camp.tech_done[g_camp.active_tech] && g_camp.scientists > 0) {
-            const TechDef *td = tech_get_def(g_camp.active_tech);
-            g_camp.tech_prog[g_camp.active_tech] += g_camp.scientists;
-            if (g_camp.tech_prog[g_camp.active_tech] >= td->research_cost) {
-                g_camp.tech_prog[g_camp.active_tech] = td->research_cost;
-                g_camp.tech_done[g_camp.active_tech] = 1;
-                g_camp.time_speed = 0;
-                snprintf(g_camp.notice, sizeof(g_camp.notice),
-                         "RESEARCH COMPLETE: %s!", td->title);
-                sfx_beep(523, 50);
-                sfx_beep(784, 90);
+        /* Hourly Base Progression: Research, Workshop Manufacturing, Store Deliveries, Psi-Training */
+        if ((g_camp.valley_minute % 60) == 0) {
+            /* 1. Multi-Project Scientist Research Progression */
+            for (t = 0; t < TECH_COUNT; t++) {
+                if (!g_camp.tech_done[t] && g_camp.tech_scientists[t] > 0) {
+                    const TechDef *td = tech_get_def(t);
+                    g_camp.tech_prog[t] += g_camp.tech_scientists[t];
+                    if (g_camp.tech_prog[t] >= td->research_cost) {
+                        char l1[44];
+                        g_camp.tech_prog[t]       = td->research_cost;
+                        g_camp.tech_done[t]       = 1;
+                        g_camp.tech_scientists[t] = 0; /* Return scientists to available pool */
+                        g_camp.log_sel            = t;
+                        if (t == TECH_ARV_TURRET && g_camp.arv_turret_level < 1) {
+                            g_camp.arv_turret_level = 1;
+                        } else if (t == TECH_ARV_TURRET_MK2) {
+                            g_camp.arv_turret_level = 2;
+                        }
+                        snprintf(g_camp.notice, sizeof(g_camp.notice),
+                                 "RESEARCH COMPLETE: %s!", td->title);
+                        snprintf(l1, sizeof(l1), "PROJECT: %s", td->title);
+                        campaign_push_modal("RESEARCH PROJECT COMPLETED!", l1,
+                                            td->unlock_summary,
+                                            "REPORT LOGGED IN UFOPAEDIA RESEARCH LOG.", 80, 0);
+                    }
+                }
+            }
+
+            /* 2. Workshop Timed Item Manufacturing */
+            if (g_camp.engineers > 0) {
+                int active_orders = 0;
+                for (i = 0; i < ITEM_COUNT; i++) {
+                    if (g_camp.mfg_queue[i] > 0) active_orders++;
+                }
+                if (active_orders > 0) {
+                    int pts_each = g_camp.engineers / active_orders;
+                    int rem_pts  = g_camp.engineers % active_orders;
+                    for (i = 0; i < ITEM_COUNT; i++) {
+                        if (g_camp.mfg_queue[i] > 0) {
+                            const ItemDef *id_def = item_get_def(i);
+                            int need = (id_def->mfg_hours > 0) ? id_def->mfg_hours : 12;
+                            int add  = pts_each + (rem_pts > 0 ? 1 : 0);
+                            if (rem_pts > 0) rem_pts--;
+                            g_camp.mfg_prog[i] += add;
+                            if (g_camp.mfg_prog[i] >= need) {
+                                char l1[44];
+                                g_camp.mfg_prog[i] -= need;
+                                g_camp.mfg_queue[i]--;
+                                if (g_camp.mfg_queue[i] == 0) g_camp.mfg_prog[i] = 0;
+                                return_unit_item_to_camp(i);
+                                g_camp.item_seen[i] = 1;
+                                if (i == ITEM_QUAD_DRONE || i == ITEM_UFO_DRONE) {
+                                    g_camp.arv_drone_item = i;
+                                }
+                                snprintf(g_camp.notice, sizeof(g_camp.notice),
+                                         "WORKSHOP BUILT: %s!", id_def->full_name);
+                                snprintf(l1, sizeof(l1), "BUILT: 1x %s", id_def->full_name);
+                                campaign_push_modal("WORKSHOP PRODUCTION COMPLETE!", l1,
+                                                    "ENGINEERS COMPLETED FABRICATION.",
+                                                    "ITEM STORED IN HQ / ARV ARMORY.", 144, 0);
+                            }
+                        }
+                    }
+                }
+            }
+
+            /* 3. Quartermaster Store Delivery Transit */
+            for (i = 0; i < ITEM_COUNT; i++) {
+                if (g_camp.store_transit_qty[i] > 0) {
+                    if (g_camp.store_transit_hrs[i] > 1) {
+                        g_camp.store_transit_hrs[i]--;
+                    } else {
+                        const ItemDef *id_def = item_get_def(i);
+                        int qty = g_camp.store_transit_qty[i], k;
+                        char l1[44];
+                        g_camp.store_transit_hrs[i] = 0;
+                        g_camp.store_transit_qty[i] = 0;
+                        for (k = 0; k < qty; k++) {
+                            return_unit_item_to_camp(i);
+                        }
+                        g_camp.item_seen[i] = 1;
+                        if (i == ITEM_QUAD_DRONE || i == ITEM_UFO_DRONE) {
+                            g_camp.arv_drone_item = i;
+                        }
+                        snprintf(g_camp.notice, sizeof(g_camp.notice),
+                                 "DELIVERY ARRIVED: +%d %s!", qty, id_def->short_name);
+                        snprintf(l1, sizeof(l1), "RECEIVED: %dx %s", qty, id_def->full_name);
+                        campaign_push_modal("QUARTERMASTER DELIVERY ARRIVED!", l1,
+                                            "SHIPMENT UNLOADED AT COOPERSBURG HQ.",
+                                            "ITEMS NOW AVAILABLE FOR SQUAD USE!", 96, 0);
+                    }
+                }
+            }
+
+            /* 4. Psi-Lab Operative Psionic Training */
+            for (i = 0; i < MAX_ROSTER_SIZE; i++) {
+                Operative *op = &g_camp.squad[i];
+                if (op->active && op->psi_trained == 1) {
+                    if (op->psi_hours_left > 1) {
+                        op->psi_hours_left--;
+                    } else {
+                        char l1[44], l2[44];
+                        op->psi_hours_left = 0;
+                        op->psi_trained    = 2; /* Revealed & Psi-Capable! */
+                        if (campaign_count_arv_squad() < MAX_SQUAD_SIZE) {
+                            op->assigned_arv = 1;
+                        }
+                        snprintf(g_camp.notice, sizeof(g_camp.notice),
+                                 "PSI-TRAINING DONE: %s (PSI:%d)!", op->name, op->psi_skill);
+                        snprintf(l1, sizeof(l1), "OPERATIVE: %s %s",
+                                 operative_rank_prefix(op->rank), op->name);
+                        snprintf(l2, sizeof(l2), "REVEALED PSIONIC ABILITY: %d", op->psi_skill);
+                        campaign_push_modal("PSIONIC TRAINING COMPLETED!", l1, l2,
+                                            "AGENT AVAILABLE FOR MISSIONS & MIND PROBE!", 81, 0);
+                    }
+                }
             }
         }
 
@@ -676,13 +974,17 @@ static void advance_campaign_minutes(int mins) {
                 }
             } else {
                 if (++ev->age_ticks >= ev->ttl_ticks) {
+                    char l1[44];
+                    snprintf(l1, sizeof(l1), "%s (%s) DEPARTED SECTOR", ev->tag, ev->type_title);
                     ev->active = 0;
                     snprintf(g_camp.notice, sizeof(g_camp.notice),
                              "EXPIRED: %s DEPARTED SECTOR", ev->tag);
-                    sfx_beep(220, 35);
                     if (g_camp.selected_event == i) {
                         g_camp.selected_event = first_active_event();
                     }
+                    campaign_push_modal("ALIEN CONTACT LOST!", l1,
+                                        "ALIEN FORCES COMPLETED OPERATIONS AND",
+                                        "DEPARTED BEFORE SQUAD INTERVENTION.", 33, 0);
                 }
             }
         }
@@ -703,6 +1005,33 @@ void campaign_tick(void) {
 
     g_camp.radar_tick++;
     if (g_camp.report_banner_timer > 0) g_camp.report_banner_timer--;
+
+    /* Animate Command Center Event Modal Popup if active; pause all time passing! */
+    if (g_camp.modal_open != 0) {
+        g_camp.time_speed = 0;
+        if (g_camp.modal_open == 1) {
+            if (g_camp.modal_anim_frame < 8) g_camp.modal_anim_frame++;
+            else g_camp.modal_open = 2;
+        } else if (g_camp.modal_open == 3) {
+            if (g_camp.modal_anim_frame > 0) {
+                g_camp.modal_anim_frame--;
+            } else {
+                int q;
+                for (q = 0; q < g_camp.modal_count - 1; q++) {
+                    g_camp.modal_queue[q] = g_camp.modal_queue[q + 1];
+                }
+                if (g_camp.modal_count > 0) g_camp.modal_count--;
+                if (g_camp.modal_count > 0) {
+                    g_camp.modal_open       = 1;
+                    g_camp.modal_anim_frame = 0;
+                    sfx_beep(523, 30);
+                } else {
+                    g_camp.modal_open = 0;
+                }
+            }
+        }
+        return;
+    }
 
     if (g_camp.intercept_open) {
         tick_ufo_interception();
@@ -732,11 +1061,14 @@ static void launch_selected_mission(void) {
     if (ev_idx >= 0 && ev_idx < MAX_RADAR_EVENTS && g_camp.events[ev_idx].active) {
         g_camp.selected_sector = g_camp.events[ev_idx].biome_id;
         g_camp.launched_event  = ev_idx;
+        g_battle.ufo_class     = g_camp.events[ev_idx].ufo_size;
     } else {
         g_camp.launched_event = -1;
+        g_battle.ufo_class    = 0;
     }
 
     g_camp.launch_prompt_open = 0;
+    g_camp.deploy_night       = is_valley_night();
     sfx_laser();
     isomap_start_mission(g_camp.selected_sector, g_camp.deploy_night);
 
@@ -748,7 +1080,6 @@ static void launch_selected_mission(void) {
 static void show_alien_victory_gameover_screen(void);
 
 void campaign_on_mission_complete(void) {
-
     int i, k;
     int kia_cnt = 0;
     int promo_cnt = 0;
@@ -756,15 +1087,28 @@ void campaign_on_mission_complete(void) {
     char promo_name[24] = "";
     char recruit_name[24] = "";
     int mission_won = (g_battle.mission_ended == 1);
-    int contested_retreat = (!mission_won && g_battle.mission_ended == 0 &&
+    int squad_wiped = (g_battle.mission_ended == 2);
+    int contested_retreat = (!mission_won && !squad_wiped &&
                              (g_battle.turn_number > 1 || g_battle.aliens_killed > 0));
 
+    g_camp.debrief_live_captured       = 0;
+    g_camp.debrief_died_no_containment = 0;
+
     for (i = 0; i < MAX_SQUAD_SIZE; i++) {
-        Operative *op = &g_camp.squad[i];
         Unit *u = &g_units[i];
-        int dead_on_field = (!u->active || u->is_corpse || u->hp <= 0);
-        int left_outside_bus = (!mission_won && !dead_on_field && !isomap_unit_in_bus(u));
-        int fell_in_action = dead_on_field || left_outside_bus;
+        int r_idx = u->roster_idx;
+        Operative *op;
+        int dead_on_field;
+        int left_outside_bus;
+        int fell_in_action;
+
+        if (r_idx < 0 || r_idx >= MAX_ROSTER_SIZE || !g_camp.squad[r_idx].active) continue;
+        op = &g_camp.squad[r_idx];
+
+        /* Note: unconscious operatives (u->is_unconscious && u->hp > 0) are recovered ALIVE if mission_won! */
+        dead_on_field    = (!u->active || u->hp <= 0 || u->is_zombie || (u->is_corpse && !u->is_unconscious));
+        left_outside_bus = (!mission_won && !dead_on_field && (u->is_unconscious || !isomap_unit_in_bus(u)));
+        fell_in_action   = squad_wiped || dead_on_field || left_outside_bus;
 
         if (fell_in_action) {
             kia_cnt++;
@@ -773,12 +1117,25 @@ void campaign_on_mission_complete(void) {
                                       g_camp.valley_day,
                                       left_outside_bus ? "MIA (LEFT BEHIND)" : "KIA IN ACTION");
             if (g_camp.memorial_count < MAX_MEMORIAL) g_camp.memorial_count++;
-            operative_hire_replacement(op, g_camp.recruit_pool, MAX_RECRUIT_POOL,
-                                       g_camp.squad, MAX_SQUAD_SIZE);
-            if (recruit_name[0] == '\0') {
-                operative_format_full_name(op, recruit_name, sizeof(recruit_name));
+
+            /* On Squad Wipe, all carried weapons and equipment on the team are permanently LOST!
+             * And fallen operatives leave an open berth (or if 0 operatives remain at HQ, 1 rookie joins). */
+            op->active       = 0;
+            op->assigned_arv = 0;
+            if (!squad_wiped && mission_won) {
+                /* If squad won the mission, recover fallen teammate's gear from the battlefield */
+                if (u->rhand_item >= 0) { return_unit_item_to_camp(u->rhand_item); u->rhand_item = ITEM_NONE; }
+                if (u->lhand_item >= 0) { return_unit_item_to_camp(u->lhand_item); u->lhand_item = ITEM_NONE; }
+                for (k = 0; k < INV_BELT_SMALL; k++) {
+                    if (u->belt_small[k] >= 0) { return_unit_item_to_camp(u->belt_small[k]); u->belt_small[k] = ITEM_NONE; }
+                }
+                for (k = 0; k < INV_BELT_LARGE; k++) {
+                    if (u->belt_large[k] >= 0) { return_unit_item_to_camp(u->belt_large[k]); u->belt_large[k] = ITEM_NONE; }
+                }
+                for (k = 0; k < INV_BACKPACK_SZ; k++) {
+                    if (u->backpack[k] >= 0) { return_unit_item_to_camp(u->backpack[k]); u->backpack[k] = ITEM_NONE; }
+                }
             }
-            if (focus_slot < 0) focus_slot = i;
         } else {
             int surv_xp = 0;
             int gained;
@@ -816,13 +1173,40 @@ void campaign_on_mission_complete(void) {
             if (operative_add_xp(op, gained) > 0) {
                 if (promo_cnt == 0) {
                     operative_format_full_name(op, promo_name, sizeof(promo_name));
-                    focus_slot = i;
+                    focus_slot = r_idx;
                 }
                 promo_cnt++;
             }
         }
     }
 
+    /* If Squad Wiped, any deployed ARV Drone on the mission is also lost! */
+    if (squad_wiped && g_battle.bus_drone_launched && g_camp.arv_drone_item != ITEM_NONE) {
+        int dr_id = g_camp.arv_drone_item;
+        if (g_camp.arv_cargo[dr_id] > 0) g_camp.arv_cargo[dr_id]--;
+        else if (g_camp.stores[dr_id] > 0) g_camp.stores[dr_id]--;
+        if (g_camp.arv_cargo[dr_id] <= 0 && g_camp.stores[dr_id] <= 0) {
+            g_camp.arv_drone_item = ITEM_NONE;
+        }
+    }
+
+    /* Ensure at least 1 active operative exists at HQ if the entire roster was wiped out */
+    if (campaign_count_hired_operatives() == 0) {
+        operative_hire_replacement(&g_camp.squad[0], g_camp.recruit_pool, MAX_RECRUIT_POOL,
+                                   g_camp.squad, MAX_ROSTER_SIZE);
+        g_camp.squad[0].assigned_arv = 1;
+        operative_format_full_name(&g_camp.squad[0], recruit_name, sizeof(recruit_name));
+        focus_slot = 0;
+    } else if (campaign_count_arv_squad() == 0) {
+        /* Auto-assign an available reserve operative at HQ to the ARV */
+        for (i = 0; i < MAX_ROSTER_SIZE; i++) {
+            if (g_camp.squad[i].active && g_camp.squad[i].psi_trained != 1) {
+                g_camp.squad[i].assigned_arv = 1;
+                focus_slot = i;
+                break;
+            }
+        }
+    }
 
     if (focus_slot >= 0) {
         g_camp.selected_soldier = focus_slot;
@@ -842,7 +1226,7 @@ void campaign_on_mission_complete(void) {
         int civ_rescued = 0;
         if (mission_won) {
             civ_rescued = g_battle.civilians_saved;
-        } else {
+        } else if (!squad_wiped) {
             for (i = 0; i < MAX_UNITS; i++) {
                 if (g_units[i].active && g_units[i].faction == FACTION_CIVILIAN &&
                     isomap_unit_in_bus(&g_units[i])) {
@@ -858,22 +1242,43 @@ void campaign_on_mission_complete(void) {
         if (g_camp.money < 0) g_camp.money = 0;
     }
 
-    /* Sync recovered materials, artifacts & fallen alien weapons/ammo/corpses into Base Stores! */
-    g_camp.stores[ITEM_ELERIUM]  += g_battle.elerium_recovered;
-    g_camp.stores[ITEM_ALLOYS]   += g_battle.alloys_recovered;
-    g_camp.stores[ITEM_UFO_NAV]  += g_battle.nav_recovered;
-    g_camp.stores[ITEM_UFO_CRYO] += g_battle.cryo_recovered;
-    g_camp.stores[ITEM_UFO_POD]  += g_battle.pods_recovered;
+    /* Sync recovered materials, artifacts & fallen/captured aliens into Base Stores (only if not wiped!) */
+    if (!squad_wiped) {
+        g_camp.stores[ITEM_ELERIUM]  += g_battle.elerium_recovered;
+        g_camp.stores[ITEM_ALLOYS]   += g_battle.alloys_recovered;
+        g_camp.stores[ITEM_UFO_NAV]  += g_battle.nav_recovered;
+        g_camp.stores[ITEM_UFO_CRYO] += g_battle.cryo_recovered;
+        g_camp.stores[ITEM_UFO_POD]  += g_battle.pods_recovered;
+    }
 
     if (mission_won) {
+        int has_containment = has_facility(FAC_CONTAINMENT);
         for (i = 0; i < MAX_UNITS; i++) {
             const Unit *au = &g_units[i];
-            if (au->is_corpse && au->faction == 1) {
-                int c_id = (au->unit_type == 3) ? ITEM_CORPSE_MUTON :
+            if (au->orig_faction == FACTION_ALIEN && !au->is_zombie &&
+                (au->is_corpse || au->is_unconscious)) {
+                int c_id = (au->unit_type == 5) ? ITEM_CORPSE_CRYPTID :
+                           (au->unit_type == 3) ? ITEM_CORPSE_MUTON :
                            (au->unit_type == 2) ? ITEM_CORPSE_FLOATER : ITEM_CORPSE_SECTOID;
+                int l_id = (au->unit_type == 5) ? ITEM_LIVE_CRYPTID :
+                           (au->unit_type == 3) ? ITEM_LIVE_MUTON :
+                           (au->unit_type == 2) ? ITEM_LIVE_FLOATER :
+                           (au->alien_rank == 3) ? ITEM_LIVE_SECTOID_CMDR : ITEM_LIVE_SECTOID;
                 int w_id = au->weapon_id;
-                int a_id = item_get_def(w_id)->ammo_item_id;
-                g_camp.stores[c_id]++;
+                int a_id = (w_id >= 0) ? item_get_def(w_id)->ammo_item_id : ITEM_NONE;
+
+                if (au->is_unconscious && au->hp > 0) {
+                    if (has_containment) {
+                        g_camp.stores[l_id]++;
+                        g_camp.debrief_live_captured++;
+                    } else {
+                        /* Captured alien dies upon return to HQ without Alien Containment! */
+                        g_camp.stores[c_id]++;
+                        g_camp.debrief_died_no_containment++;
+                    }
+                } else {
+                    g_camp.stores[c_id]++;
+                }
                 if (item_is_weapon(w_id)) g_camp.stores[w_id]++;
                 if (item_is_ammo(a_id))   g_camp.stores[a_id]++;
                 if (au->grenades > 0)     g_camp.stores[ITEM_ALIEN_GRENADE] += au->grenades;
@@ -882,7 +1287,9 @@ void campaign_on_mission_complete(void) {
         g_camp.money += 1500 + g_battle.aliens_killed * 250;
         g_camp.win_streak++;
     } else {
-        g_camp.money += g_battle.aliens_killed * 150;
+        if (!squad_wiped) {
+            g_camp.money += g_battle.aliens_killed * 150;
+        }
         g_camp.win_streak = 0;
     }
 
@@ -890,6 +1297,26 @@ void campaign_on_mission_complete(void) {
         if (g_camp.stores[i] > 0 || g_camp.arv_cargo[i] > 0) {
             g_camp.item_seen[i] = 1;
         }
+    }
+
+    if (g_camp.debrief_died_no_containment > 0) {
+        char l1[44];
+        snprintf(l1, sizeof(l1), "%d CAPTURED ALIEN(S) DIED AT HQ!", g_camp.debrief_died_no_containment);
+        campaign_push_modal("NO ALIEN CONTAINMENT AT HQ!", l1,
+                            "LIVE SPECIMENS EXPIRED UPON RETURN.",
+                            "BUILD ALIEN CONTAINMENT TO KEEP LIVE ALIENS!", 33, 1);
+    } else if (g_camp.debrief_live_captured > 0) {
+        char l1[44];
+        snprintf(l1, sizeof(l1), "%d LIVE ALIEN(S) SECURED IN CONTAINMENT!", g_camp.debrief_live_captured);
+        campaign_push_modal("LIVE ALIEN SPECIMEN SECURED!", l1,
+                            "ASSIGN SCIENTISTS IN THE RESEARCH TAB TO",
+                            "INTERROGATE CAPTURED LIVE SPECIMENS!", 80, 0);
+    }
+    if (squad_wiped) {
+        campaign_push_modal("SQUAD WIPED IN ACTION!",
+                            "ALL DEPLOYED OPERATIVES & GEAR LOST!",
+                            "REPLENISH WEAPONS FROM STORES, STORE OR",
+                            "WORKSHOP & HIRE NEW OPERATIVES AT HQ.", 33, 2);
     }
 
 
@@ -1051,7 +1478,7 @@ static void show_alien_victory_gameover_screen(void) {
 
 int campaign_save_game(const char *filename) {
     FILE *fp = fopen(filename ? filename : "DUFFSAVE.SAV", "wb");
-    uint32_t magic = 0x44554636U;
+    uint32_t magic = 0x44554637U;
     uint32_t sz    = (uint32_t)sizeof(CampaignState);
     if (!fp) return 0;
     fwrite(&magic, sizeof(magic), 1, fp);
@@ -1074,7 +1501,7 @@ int campaign_load_game(const char *filename) {
     }
     if (fread(&magic, sizeof(magic), 1, fp) != 1 ||
         fread(&sz,    sizeof(sz),    1, fp) != 1 ||
-        magic != 0x44554636U || sz != (uint32_t)sizeof(CampaignState) ||
+        magic != 0x44554637U || sz != (uint32_t)sizeof(CampaignState) ||
         fread(&loaded, sizeof(CampaignState), 1, fp) != 1) {
         fclose(fp);
         snprintf(g_camp.notice, sizeof(g_camp.notice), "INVALID OR OLD SAVE FILE!");
@@ -1088,6 +1515,8 @@ int campaign_load_game(const char *filename) {
     g_camp.intercept_open     = 0;
     g_camp.base_modal         = 0;
     g_camp.time_speed         = 0;
+    g_camp.modal_open         = 0;
+    g_camp.modal_count        = 0;
 
     for (i = 0; i < MAX_RADAR_EVENTS; i++) {
         RadarEvent *ev = &g_camp.events[i];
@@ -1098,10 +1527,15 @@ int campaign_load_game(const char *filename) {
             ev->intel_desc = "ALIENS ATTACKING DUFF-COM HOME BASE!";
         } else {
             update_event_nearest_site(ev);
-            ev->type_title = ev->is_flying ? "FLYING UFO" :
-                             (ev->severity == 0 ? "CRASHED UFO" : "LANDED UFO");
-            ev->intel_desc = ev->is_flying ? "AIRBORNE UFO TRACKED OVER VALLEY"
-                                           : "ALIEN CONTACT IN LEHIGH VALLEY";
+            if (ev->is_flying) {
+                ev->type_title = (ev->ufo_size == 0) ? "SCOUT UFO" :
+                                 (ev->ufo_size == 1) ? "HARVESTER UFO" :
+                                 (ev->ufo_size == 2) ? "ABDUCTOR SHIP" : "COMMAND DREADNOUGHT";
+                ev->intel_desc = "AIRBORNE UFO TRACKED OVER VALLEY";
+            } else {
+                ev->type_title = (ev->severity == 0) ? "CRASHED UFO" : "LANDED UFO";
+                ev->intel_desc = "ALIEN CONTACT IN LEHIGH VALLEY";
+            }
         }
     }
     campaign_sync_squad_units();
@@ -1192,10 +1626,14 @@ static void render_launch_modal(const RadarEvent *ev) {
     char buf[80];
     int mx = g_input.mx, my = g_input.my;
     int has_offense = has_facility(FAC_TURRET);
-    int hov_time   = (mx >= 16  && mx < 232 && my >= 95  && my < 109);
-    int hov_launch = (mx >= 16  && mx < 122 && my >= 126 && my < 146);
-    int hov_cancel = (mx >= 126 && mx < 232 && my >= 126 && my < 146);
-    static const char *sz_names[3] = { "SMALL SCOUT", "MEDIUM CRUISER", "LARGE BATTLESHIP" };
+    int is_night    = is_valley_night();
+    int hr          = (g_camp.valley_minute / 60) % 24;
+    int mn          = g_camp.valley_minute % 60;
+    int hov_launch  = (mx >= 16  && mx < 122 && my >= 126 && my < 146);
+    int hov_cancel  = (mx >= 126 && mx < 232 && my >= 126 && my < 146);
+    static const char *sz_names[4] = {
+        "SMALL SCOUT", "MEDIUM HARVESTER", "LARGE ABDUCTOR", "CMD DREADNOUGHT"
+    };
 
     vga_rect_fill(14, 38, 226, 118, 15);
     vga_rect_bevel(10, 34, 228, 118, 76, 96, 79);
@@ -1203,8 +1641,8 @@ static void render_launch_modal(const RadarEvent *ev) {
 
     vga_rect_bevel(16, 40, 216, 13, 36, 96, 45);
     snprintf(buf, sizeof(buf), ">> CONTACT #%02u: %s <<",
-             (unsigned)(ev->event_num % 100), sz_names[ev->ufo_size % 3]);
-    vga_print_shadow(22, 43, buf, 96, 15);
+             (unsigned)(ev->event_num % 100), sz_names[ev->ufo_size & 3]);
+    vga_print_shadow(16 + (216 - vga_text_width(buf)) / 2, 43, buf, 96, 15);
 
     snprintf(buf, sizeof(buf), "STATUS: %s (%s)", ev->type_title, ev->tag);
     vga_print_shadow(18, 58, buf, 96, 15);
@@ -1212,7 +1650,7 @@ static void render_launch_modal(const RadarEvent *ev) {
     snprintf(buf, sizeof(buf), "SECTOR: %s", ev->loc_name);
     vga_print_shadow(18, 69, buf, 80, 15);
 
-    vga_print(18, 80, ev->intel_desc, 18);
+    vga_print_sm(18, 81, ev->intel_desc, 18);
 
     if (ev->is_flying) {
         vga_rect_bevel(16, 95, 216, 14, 13, 80, 15);
@@ -1229,12 +1667,11 @@ static void render_launch_modal(const RadarEvent *ev) {
         vga_rect_bevel(16, 126, 106, 20, hov_launch ? 34 : 36, 96, 45);
         vga_print_shadow(24, 133, has_offense ? "SHOOT DOWN!" : "TRACK PASS", 96, 15);
     } else {
-        vga_rect_bevel(16, 95, 216, 14, g_camp.deploy_night ? 131 : 67,
-                       hov_time ? 96 : 80, 79);
-        vga_print_shadow(20, 99,
-                         g_camp.deploy_night ? "OPS: NIGHT (DARK) [CLICK:DAY]"
-                                             : "OPS: DAYLIGHT     [CLICK:NGT]",
-                         96, 15);
+        vga_rect_bevel(16, 95, 216, 14, is_night ? 131 : 67, 80, 79);
+        snprintf(buf, sizeof(buf), "TIME: %02d:%02d - %s",
+                 hr, mn, is_night ? "NIGHT MISSION (DARK)" : "DAYLIGHT MISSION");
+        vga_print_shadow(16 + (216 - vga_text_width(buf)) / 2, 99,
+                         buf, is_night ? 80 : 96, 15);
 
         vga_print_shadow(22, 114, "DEPLOY ARMORED RESPONSE BUS?", 96, 15);
 
@@ -1340,8 +1777,8 @@ static void render_radar_tab(void) {
         }
 
         /* Size of the ship is indicated by the size of the dot on the radar map! */
-        dot_r = 1 + (ev->ufo_size % 3);
-        ch_r  = 3 + (ev->ufo_size % 3) * 2;
+        dot_r = 1 + (ev->ufo_size & 3);
+        ch_r  = 3 + (ev->ufo_size & 3) * 2;
 
         if (ev->is_flying) {
             radar_pset_clip(ev->rx - ev->vx * 2, ev->ry - ev->vy * 2, 66);
@@ -1373,18 +1810,18 @@ static void render_radar_tab(void) {
     if (hov_event >= 0) {
         const RadarEvent *ev = &g_camp.events[hov_event];
         snprintf(bar_buf, sizeof(bar_buf), "%s @ %s", ev->type_title, ev->loc_name);
-        vga_print_shadow(10, 153, bar_buf, 96, 15);
+        vga_print_sm(10, 154, bar_buf, 96);
     } else if (g_camp.report_banner_timer > 0 &&
                g_camp.last_reported_idx >= 0 &&
                g_camp.events[g_camp.last_reported_idx].active) {
         const RadarEvent *ev = &g_camp.events[g_camp.last_reported_idx];
         uint8_t acol = (g_camp.radar_tick & 8) ? 96 : 32;
         snprintf(bar_buf, sizeof(bar_buf), "ALERT: %s @ %s", ev->type_title, ev->loc_name);
-        vga_print_shadow(10, 153, bar_buf, acol, 15);
+        vga_print_sm(10, 154, bar_buf, acol);
     } else if (active_cnt > 0) {
-        vga_print_shadow(10, 153, "CLICK RADAR CONTACT TO INTERCEPT/DEPLOY", 80, 15);
+        vga_print_sm(10, 154, "CLICK RADAR CONTACT TO INTERCEPT OR DEPLOY SQUAD", 80);
     } else {
-        vga_print_shadow(10, 153, "NO CONTACTS - USE RIGHT MENU TIME (1H/1D)", 19, 15);
+        vga_print_sm(10, 154, "NO ACTIVE CONTACTS - USE RIGHT MENU TIME (1H/1D)", 19);
     }
 
     if (g_camp.intercept_open &&
@@ -1472,6 +1909,71 @@ static void render_right_side_menu(void) {
     }
 }
 
+static void render_event_modal(void) {
+    int f = g_camp.modal_anim_frame;
+    int full_w = 248, full_h = 126;
+    int w, h, x0, y0, y, x;
+    const ModalAlert *m;
+    int mx = g_input.mx, my = g_input.my;
+    int hov_ack;
+
+    if (g_camp.modal_open == 0 || g_camp.modal_count <= 0) return;
+    if (f < 1) f = 1;
+    if (f > 8) f = 8;
+
+    m  = &g_camp.modal_queue[0];
+    w  = (full_w * f) / 8;
+    h  = (full_h * f) / 8;
+    x0 = (SCREEN_W - w) / 2;
+    y0 = 26 + (full_h - h) / 2;
+
+    /* Shadow & Outer Duff-COM Bevel Frame */
+    vga_rect_fill(x0 + 3, y0 + 3, w, h, 15);
+    vga_rect_bevel(x0, y0, w, h, 65, m->accent_col ? m->accent_col : 96, 172);
+
+    if (w > 8 && h > 8) {
+        vga_rect_fill(x0 + 2, y0 + 2, w - 4, h - 4, 14);
+        if (gfx_modal_bg && gfx_modal_w > 0 && gfx_modal_h > 0 && f == 8) {
+            int bw = (gfx_modal_w < full_w - 4) ? gfx_modal_w : (full_w - 4);
+            int bh = (gfx_modal_h < full_h - 4) ? gfx_modal_h : (full_h - 4);
+            int ox = (full_w - 4 - bw) / 2;
+            int oy = (full_h - 4 - bh) / 2;
+            for (y = 0; y < bh; y++) {
+                const uint8_t *src = gfx_modal_bg + y * gfx_modal_w;
+                uint8_t *dst = vga_backbuf + (y0 + 2 + oy + y) * SCREEN_W + (x0 + 2 + ox);
+                for (x = 0; x < bw; x++) {
+                    dst[x] = src[x];
+                }
+            }
+        } else {
+            /* CRT scanline & Duff-COM watermark bars */
+            for (y = y0 + 4; y < y0 + h - 4; y += 3) {
+                vga_hline(x0 + 4, x0 + w - 5, y, 15);
+            }
+        }
+    }
+
+    if (f < 7) return;
+
+    /* Header Strip */
+    vga_rect_bevel(x0 + 6, y0 + 6, w - 12, 16, 36, m->accent_col ? m->accent_col : 96, 45);
+    vga_print_shadow(x0 + 12, y0 + 11, "DUFF-COM PRIORITY DISPATCH", 80, 15);
+
+    /* Event Title & 3 Content Lines */
+    vga_rect_bevel(x0 + 8, y0 + 26, w - 16, 66, 15, 68, 13);
+    vga_print_shadow(x0 + (w - vga_text_width(m->title)) / 2, y0 + 32,
+                     m->title, m->accent_col ? m->accent_col : 96, 15);
+    vga_hline(x0 + 14, x0 + w - 15, y0 + 42, 68);
+    vga_print_sm(x0 + (w - vga_text_width_sm(m->line1)) / 2, y0 + 49, m->line1, 0);
+    vga_print_sm(x0 + (w - vga_text_width_sm(m->line2)) / 2, y0 + 61, m->line2, 80);
+    vga_print_sm(x0 + (w - vga_text_width_sm(m->line3)) / 2, y0 + 73, m->line3, 18);
+
+    /* Acknowledge Button */
+    hov_ack = (mx >= x0 + 64 && mx < x0 + 184 && my >= y0 + 97 && my < y0 + 119);
+    vga_rect_bevel(x0 + 64, y0 + 97, 120, 22, hov_ack ? 34 : 36, 96, 45);
+    vga_print_shadow(x0 + 82, y0 + 105, "[ ACKNOWLEDGE ]", 96, 15);
+}
+
 void campaign_render(void) {
     char res_buf[64];
 
@@ -1492,6 +1994,10 @@ void campaign_render(void) {
              g_camp.total_score);
     vga_print_shadow(8, 173, res_buf, 80, 15);
     vga_print(8, 185, g_camp.notice, 96);
+
+    if (g_camp.modal_open != 0) {
+        render_event_modal();
+    }
 }
 
 static void fire_intercept_battery(int aim_x, int aim_y) {
@@ -1526,7 +2032,8 @@ static void fire_intercept_battery(int aim_x, int aim_y) {
             ev->ttl_ticks = 1440;
             update_event_nearest_site(ev);
             ev->type_title = (ev->ufo_size == 0) ? "CRASHED SCOUT" :
-                             (ev->ufo_size == 1) ? "CRASHED CRUISER" : "DOWNED BATTLESHIP";
+                             (ev->ufo_size == 1) ? "CRASHED HARVESTER" :
+                             (ev->ufo_size == 2) ? "DOWNED ABDUCTOR" : "DOWNED COMMAND SHIP";
             ev->intel_desc = "SHOT DOWN BY DUFF-COM BATTERY!";
             snprintf(ev->tag, sizeof(ev->tag), "SITE-%02u", (unsigned)(ev->event_num % 100));
 
@@ -1537,6 +2044,11 @@ static void fire_intercept_battery(int aim_x, int aim_y) {
             g_camp.launch_prompt_open = 1;
             snprintf(g_camp.notice, sizeof(g_camp.notice),
                      "SPLASH ONE! %s DOWN AT %s!", ev->tag, ev->loc_name);
+            campaign_push_modal("UFO SHOT DOWN BY HQ BATTERY!",
+                                ev->type_title,
+                                ev->loc_name,
+                                "STRIKE TEAM READY TO DEPLOY TO CRASH SITE",
+                                144, 2);
         } else {
             snprintf(g_camp.notice, sizeof(g_camp.notice),
                      "DIRECT HIT ON %s! (%d/%d HP)", ev->tag, ev->ufo_hp, ev->ufo_hp_max);
@@ -1561,6 +2073,23 @@ static void cycle_selected_event(int delta) {
 
 void campaign_handle_input(void) {
     int mx = g_input.mx, my = g_input.my;
+
+    /* -1. Priority Event Modal Popup Acknowledgment */
+    if (g_camp.modal_open != 0) {
+        if (g_camp.modal_open <= 2) {
+            int x0 = (SCREEN_W - 248) / 2;
+            int y0 = 26;
+            if (g_input.last_key == KEY_ENTER || g_input.last_key == ' ' ||
+                g_input.last_key == KEY_ESC || g_input.right_clicked ||
+                (g_input.left_clicked &&
+                 mx >= x0 + 64 && mx < x0 + 184 && my >= y0 + 97 && my < y0 + 119)) {
+                g_camp.modal_open = 3;
+                sfx_beep(520, 25);
+                sfx_beep(390, 25);
+            }
+        }
+        return;
+    }
 
     /* 0. Active UFO Shoot-Down Interception Mini-Game Input */
     if (g_camp.intercept_open) {
@@ -1611,11 +2140,6 @@ void campaign_handle_input(void) {
             sfx_click();
             return;
         }
-        if (ev && !ev->is_flying && (g_input.last_key == 't' || g_input.last_key == 'T')) {
-            g_camp.deploy_night = !g_camp.deploy_night;
-            sfx_click();
-            return;
-        }
         if (g_input.left_clicked) {
             if (mx >= 16 && mx < 122 && my >= 126 && my < 146) {
                 if (ev && ev->is_flying) {
@@ -1633,11 +2157,6 @@ void campaign_handle_input(void) {
             if ((mx >= 126 && mx < 232 && my >= 126 && my < 146) ||
                 mx < 10 || mx >= 238 || my < 34 || my >= 152) {
                 g_camp.launch_prompt_open = 0;
-                sfx_click();
-                return;
-            }
-            if (ev && !ev->is_flying && mx >= 16 && mx < 232 && my >= 95 && my < 109) {
-                g_camp.deploy_night = !g_camp.deploy_night;
                 sfx_click();
                 return;
             }
@@ -1678,12 +2197,26 @@ void campaign_handle_input(void) {
         }
     } else if (g_camp.active_tab == 2) {
         if (g_input.last_key == KEY_UP || g_input.last_key == KEY_LEFT) {
-            g_camp.selected_soldier = (g_camp.selected_soldier + MAX_SQUAD_SIZE - 1) % MAX_SQUAD_SIZE;
-            sfx_click();
+            int k;
+            for (k = 1; k <= MAX_ROSTER_SIZE; k++) {
+                int idx = (g_camp.selected_soldier + MAX_ROSTER_SIZE - k) % MAX_ROSTER_SIZE;
+                if (g_camp.squad[idx].active) {
+                    g_camp.selected_soldier = idx;
+                    sfx_click();
+                    break;
+                }
+            }
         }
         if (g_input.last_key == KEY_DOWN || g_input.last_key == KEY_RIGHT) {
-            g_camp.selected_soldier = (g_camp.selected_soldier + 1) % MAX_SQUAD_SIZE;
-            sfx_click();
+            int k;
+            for (k = 1; k <= MAX_ROSTER_SIZE; k++) {
+                int idx = (g_camp.selected_soldier + k) % MAX_ROSTER_SIZE;
+                if (g_camp.squad[idx].active) {
+                    g_camp.selected_soldier = idx;
+                    sfx_click();
+                    break;
+                }
+            }
         }
         if (g_input.last_key == KEY_ENTER || g_input.last_key == ' ') {
             g_camp.armory_subtab = (g_camp.armory_subtab + 1) % 3;

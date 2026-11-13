@@ -307,16 +307,16 @@ static void blit_compact_pouch_icon(int dx, int dy, int item_id) {
 
 static void draw_inv_mini_bar(int x, int y, const char *lbl, int val, int max_v, uint8_t col) {
     char s[12];
-    int bw = 38;
+    int bw = 42;
     int fw = (max_v > 0) ? ((val * bw) / max_v) : 0;
     if (fw < 0) fw = 0;
     if (fw > bw) fw = bw;
-    vga_print(x, y, lbl, 3);
+    vga_print_sm(x, y + 1, lbl, 3);
     snprintf(s, sizeof(s), "%2d", val);
-    vga_print(x + 20, y, s, 0);
-    vga_rect_bevel(x + 34, y, bw + 2, 6, 13, 10, 15);
+    vga_print_sm(x + 15, y + 1, s, 0);
+    vga_rect_bevel(x + 28, y, bw + 2, 6, 13, 10, 15);
     if (fw > 0) {
-        vga_rect_fill(x + 35, y + 1, fw, 4, col);
+        vga_rect_fill(x + 29, y + 1, fw, 4, col);
     }
 }
 
@@ -379,10 +379,10 @@ static void render_inv_modal(void) {
         snprintf(buf, sizeof(buf), "%s (#%d)", u->name, (g_battle.selected_unit % MAX_SQUAD_SIZE) + 1);
         vga_print_shadow(57, 7, buf, 96, 15);
 
-        vga_print_shadow(158, 7,
-                         g_battle.pre_mission_equip ? "ARV LOADOUT"
-                         : (in_bus ? "ARV BAY EQUIP" : "FIELD EQUIP"),
-                         80, 15);
+        vga_print_sm_shadow(176, 8,
+                            g_battle.pre_mission_equip ? "ARV LOADOUT"
+                            : (in_bus ? "ARV BAY EQUIP" : "FIELD EQUIP"),
+                            80, 15);
 
         vga_rect_bevel(234, 4, 80, 13,
                        hov_done ? 34 : (g_battle.pre_mission_equip ? 36 : 67),
@@ -399,8 +399,8 @@ static void render_inv_modal(void) {
         int hov_rh = (!g_drag_active && mx >= 49 && mx < 90 && my >= 21 && my < 30);
         vga_rect_bevel(49, 21, 41, 9, (u->active_hand == 0) ? 67 : (hov_rh ? 65 : 68),
                        (u->active_hand == 0 || hov_rh) ? 96 : 162, 79);
-        vga_print(52, 23, (u->active_hand == 0) ? "ACTIVE" : "SELECT",
-                  (u->active_hand == 0) ? 18 : 80);
+        vga_print_sm(58, 23, (u->active_hand == 0) ? "ACTIVE" : "SELECT",
+                     (u->active_hand == 0) ? 18 : 80);
     }
     {
         const InvSlotRect *sr = &inv_slot_rects[SLOT_RHAND];
@@ -418,24 +418,24 @@ static void render_inv_modal(void) {
                 draw_slot_prime_badge(sr->x + sr->w - 14, sr->y + 1, u->slot_prime[SLOT_RHAND]);
             }
         } else if (item_id < 0) {
-            vga_print(sr->x + 4, sr->y + 9, "EMPTY", 10);
+            vga_print_sm(sr->x + 8, sr->y + 10, "EMPTY", 10);
         }
         if (item_id >= 0) {
             const ItemDef *d = item_get_def(item_id);
-            vga_print(45, 32, d->short_name, 80);
+            vga_print_sm(46, 33, d->short_name, 80);
             if (item_is_weapon(item_id)) {
-                snprintf(buf, sizeof(buf), "AM:%d", u->rhand_ammo);
-                vga_print(45, 40, buf, u->rhand_ammo > 0 ? 18 : 33);
+                snprintf(buf, sizeof(buf), "AMMO:%d", u->rhand_ammo);
+                vga_print_sm(46, 40, buf, u->rhand_ammo > 0 ? 18 : 33);
             } else if (item_is_grenade(item_id)) {
                 if (u->slot_prime[SLOT_RHAND] >= 0) {
                     snprintf(buf, sizeof(buf), "PRM:%dT", u->slot_prime[SLOT_RHAND]);
-                    vga_print(45, 40, buf, 33);
+                    vga_print_sm(46, 40, buf, 33);
                 } else {
-                    vga_print(45, 40, "UNPRMD", 113);
+                    vga_print_sm(46, 40, "UNPRMD", 113);
                 }
             } else {
                 snprintf(buf, sizeof(buf), "WT:%d", d->weight);
-                vga_print(45, 40, buf, 144);
+                vga_print_sm(46, 40, buf, 144);
             }
             if (!g_battle.pre_mission_equip) {
                 if (item_is_grenade(item_id)) {
@@ -445,26 +445,26 @@ static void render_inv_modal(void) {
                     vga_rect_bevel(45, 47, 22, 11,
                                    (g_prime_target_slot == SLOT_RHAND || hov_prm) ? 34 : 68,
                                    96, 45);
-                    vga_print(47, 50, "PRM", 96);
+                    vga_print_sm(50, 50, "PRM", 96);
                     vga_rect_bevel(68, 47, 22, 11,
                                    is_prmd ? (hov_thr ? 65 : 67) : 13,
                                    is_prmd ? 96 : 10, 79);
-                    vga_print(70, 50, "THR", is_prmd ? 96 : 8);
+                    vga_print_sm(73, 50, "THR", is_prmd ? 96 : 8);
                 } else {
                     int hov_thr = (!g_drag_active && mx >= 45 && mx < 89 && my >= 47 && my < 58);
                     vga_rect_bevel(45, 47, 44, 11, hov_thr ? 65 : 68, hov_thr ? 96 : 162, 79);
-                    vga_print(58, 50, "THR", 96);
+                    vga_print_sm(55, 50, "THROW", 96);
                 }
             } else if (item_is_grenade(item_id)) {
                 int hov_prm = (!g_drag_active && mx >= 45 && mx < 89 && my >= 47 && my < 58);
                 vga_rect_bevel(45, 47, 44, 11,
                                (g_prime_target_slot == SLOT_RHAND || hov_prm) ? 34 : 68,
                                96, 45);
-                vga_print(52, 50, "PRIME", 96);
+                vga_print_sm(55, 50, "PRIME", 96);
             }
         } else {
-            vga_print(45, 35, "PRIMARY", 8);
-            vga_print(45, 44, "WEAPON", 8);
+            vga_print_sm(46, 35, "PRIMARY", 8);
+            vga_print_sm(46, 43, "WEAPON", 8);
         }
     }
 
@@ -474,8 +474,8 @@ static void render_inv_modal(void) {
         int two_hand_pct = isomap_unit_two_hand_penalty_pct(u);
         int eff_aim      = (u->firing_acc * two_hand_pct) / 100;
         if (two_hand_pct < 100) {
-            snprintf(buf, sizeof(buf), "STATS (-%d%%2H)", 100 - two_hand_pct);
-            vga_print_shadow(6, 63, buf, 113, 15);
+            snprintf(buf, sizeof(buf), "STATS (-%d%% 2H)", 100 - two_hand_pct);
+            vga_print_sm_shadow(7, 64, buf, 113, 15);
         } else {
             vga_print_shadow(8, 63, "AGENT STATS", 80, 15);
         }
@@ -490,8 +490,12 @@ static void render_inv_modal(void) {
         int wt  = isomap_unit_carried_weight(u);
         int pct = isomap_unit_move_tu_pct(u);
         uint8_t wcol = (pct <= 108) ? 18 : ((pct <= 132) ? 96 : ((pct <= 160) ? 113 : 33));
-        snprintf(buf, sizeof(buf), "WT:%2d MV:%d%%", wt, pct);
-        vga_print(7, 115, buf, wcol);
+        if (u->psi_trained >= 2) {
+            snprintf(buf, sizeof(buf), "WT:%2d  PSI:%2d", wt, u->psi_skill);
+        } else {
+            snprintf(buf, sizeof(buf), "WT:%2d  MRL:%2d", wt, u->morale);
+        }
+        vga_print_sm(7, 115, buf, wcol);
     }
 
     /* 4. Center Column: Full-Body Paper-Doll Chamber (x=95..158, y=19..124) */
@@ -541,22 +545,22 @@ static void render_inv_modal(void) {
                 draw_slot_prime_badge(sr->x + sr->w - 14, sr->y + 1, u->slot_prime[SLOT_LHAND]);
             }
         } else if (item_id < 0) {
-            vga_print(sr->x + 3, sr->y + 9, "EMPTY", 10);
+            vga_print_sm(sr->x + 8, sr->y + 10, "EMPTY", 10);
         }
         if (item_id >= 0) {
             if (item_is_weapon(item_id)) {
                 snprintf(buf, sizeof(buf), "AM:%d", u->lhand_ammo);
-                vga_print(164, 56, buf, u->lhand_ammo > 0 ? 18 : 33);
+                vga_print_sm(166, 56, buf, u->lhand_ammo > 0 ? 18 : 33);
             } else if (item_is_grenade(item_id)) {
                 if (u->slot_prime[SLOT_LHAND] >= 0) {
                     snprintf(buf, sizeof(buf), "PRM:%dT", u->slot_prime[SLOT_LHAND]);
-                    vga_print(164, 56, buf, 33);
+                    vga_print_sm(166, 56, buf, 33);
                 } else {
-                    vga_print(164, 56, "UNPRMD", 113);
+                    vga_print_sm(166, 56, "UNPRMD", 113);
                 }
             } else {
-                snprintf(buf, sizeof(buf), "%.6s", item_get_def(item_id)->short_name);
-                vga_print(164, 56, buf, 80);
+                snprintf(buf, sizeof(buf), "%.7s", item_get_def(item_id)->short_name);
+                vga_print_sm(166, 56, buf, 80);
             }
             if (!g_battle.pre_mission_equip) {
                 if (item_is_grenade(item_id)) {
@@ -566,25 +570,25 @@ static void render_inv_modal(void) {
                     vga_rect_bevel(163, 62, 18, 10,
                                    (g_prime_target_slot == SLOT_LHAND || hov_prm) ? 34 : 68,
                                    96, 45);
-                    vga_print(166, 64, "PR", 96);
+                    vga_print_sm(168, 65, "PR", 96);
                     vga_rect_bevel(182, 62, 19, 10,
                                    is_prmd ? (hov_thr ? 65 : 67) : 13,
                                    is_prmd ? 96 : 10, 79);
-                    vga_print(186, 64, "TH", is_prmd ? 96 : 8);
+                    vga_print_sm(188, 65, "TH", is_prmd ? 96 : 8);
                 } else {
                     int hov_thr = (!g_drag_active && mx >= 164 && mx < 200 && my >= 62 && my < 72);
                     vga_rect_bevel(164, 62, 36, 10, hov_thr ? 65 : 68, hov_thr ? 96 : 162, 79);
-                    vga_print(173, 64, "THR", 96);
+                    vga_print_sm(172, 65, "THROW", 96);
                 }
             } else if (item_is_grenade(item_id)) {
                 int hov_prm = (!g_drag_active && mx >= 164 && mx < 200 && my >= 62 && my < 72);
                 vga_rect_bevel(164, 62, 36, 10,
                                (g_prime_target_slot == SLOT_LHAND || hov_prm) ? 34 : 68,
                                96, 45);
-                vga_print(167, 64, "PRIME", 96);
+                vga_print_sm(172, 65, "PRIME", 96);
             }
         } else {
-            vga_print(164, 59, "2ND HD", 8);
+            vga_print_sm(170, 60, "2ND HD", 8);
         }
     }
 
@@ -630,24 +634,24 @@ static void render_inv_modal(void) {
             }
         } else if (item_id < 0) {
             snprintf(buf, sizeof(buf), "S%d", i + 1);
-            vga_print(sr->x + 5, sr->y + 7, buf, 10);
+            vga_print_sm(sr->x + 7, sr->y + 8, buf, 10);
         }
     }
 
-    /* Under-belt strip below the 4 small belt pouches (x=164..254, max 15 chars = 90px) */
+    /* Under-belt strip below the 4 small belt pouches (x=164..254) */
     if (!g_battle.pre_mission_equip) {
         int hov_tg = (!g_drag_active && mx >= 163 && mx < 207 && my >= 108 && my < 121);
         int hov_tf = (!g_drag_active && mx >= 209 && mx < 254 && my >= 108 && my < 121);
         vga_rect_bevel(163, 108, 44, 13, hov_tg ? 65 : 68, hov_tg ? 96 : 162, 79);
-        vga_print(167, 112, "PRIME", u->grenades > 0 ? 96 : 8);
+        vga_print_sm(175, 112, "PRIME", u->grenades > 0 ? 96 : 8);
 
         vga_rect_bevel(209, 108, 45, 13, hov_tf ? 65 : 68, hov_tf ? 96 : 162, 79);
-        snprintf(buf, sizeof(buf), "FLR:%d", u->flares);
-        vga_print(213, 112, buf, u->flares > 0 ? 80 : 8);
+        snprintf(buf, sizeof(buf), "FLARE:%d", u->flares);
+        vga_print_sm(217, 112, buf, u->flares > 0 ? 80 : 8);
     } else {
-        vga_print(164, 108, "CLICK GREN=PRM", 80);
-        snprintf(buf, sizeof(buf), "CL:%d GR:%d FL:%d", u->extra_clips, u->grenades, u->flares);
-        vga_print(164, 116, buf, 18);
+        vga_print_sm(164, 109, "CLICK GRENADE = PRIME", 80);
+        snprintf(buf, sizeof(buf), "CLIPS:%d  GREN:%d  FLR:%d", u->extra_clips, u->grenades, u->flares);
+        vga_print_sm(164, 116, buf, 18);
     }
 
     /* 2 Wide Large Belt Holsters/Pouches (55x18 each: drums, heavy packs, satchels, pistols) */
@@ -665,11 +669,11 @@ static void render_inv_modal(void) {
             if (item_is_grenade(item_id) && u->slot_prime[sid] >= 0) {
                 draw_slot_prime_badge(sr->x + 35, sr->y + 5, u->slot_prime[sid]);
             } else {
-                vga_print(sr->x + 35, sr->y + 6, "LRG", 80);
+                vga_print_sm(sr->x + 38, sr->y + 7, "LRG", 80);
             }
         } else if (item_id < 0) {
             snprintf(buf, sizeof(buf), "LRG #%d", i + 1);
-            vga_print(sr->x + 10, sr->y + 6, buf, 10);
+            vga_print_sm(sr->x + 15, sr->y + 7, buf, 10);
         }
     }
 
@@ -713,30 +717,30 @@ static void render_inv_modal(void) {
     } else if (inspect_id >= 0 && inspect_id < ITEM_COUNT) {
         const ItemDef *id_def = item_get_def(inspect_id);
         if (item_is_weapon(inspect_id)) {
-            snprintf(buf, sizeof(buf), "%s DMG:%d CLP:%d WT:%d",
+            snprintf(buf, sizeof(buf), "%s  DMG:%d  CLIP:%d  WT:%d",
                      id_def->full_name, id_def->dmg_base, id_def->clip_size, id_def->weight);
         } else if (item_is_ammo(inspect_id)) {
-            snprintf(buf, sizeof(buf), "%s (%d RDS) WT:%d%s",
+            snprintf(buf, sizeof(buf), "%s (%d RDS)  WT:%d%s",
                      id_def->full_name, id_def->clip_size, id_def->weight,
-                     item_fits_small_belt(inspect_id) ? "" : " [LRG]");
+                     item_fits_small_belt(inspect_id) ? "" : " [LARGE BELT]");
         } else if (item_is_grenade(inspect_id)) {
             int pr = (hov_slot >= 0 && hov_slot < SLOT_OPERATIVE_COUNT) ? u->slot_prime[hov_slot] : -1;
             if (pr >= 0) {
-                snprintf(buf, sizeof(buf), "%s [PRIMED: %d TRN] DMG:%d WT:%d",
+                snprintf(buf, sizeof(buf), "%s [PRIMED: %d TRN]  DMG:%d  WT:%d",
                          id_def->full_name, pr, id_def->dmg_base, id_def->weight);
             } else {
-                snprintf(buf, sizeof(buf), "%s DMG:%d WT:%d (CLICK TO PRIME 0-6)",
+                snprintf(buf, sizeof(buf), "%s  DMG:%d  WT:%d  (CLICK TO PRIME 0-6)",
                          id_def->full_name, id_def->dmg_base, id_def->weight);
             }
         } else {
-            snprintf(buf, sizeof(buf), "%s (WEIGHT:%d)", id_def->full_name, id_def->weight);
+            snprintf(buf, sizeof(buf), "%s  (WEIGHT:%d)", id_def->full_name, id_def->weight);
         }
-        vga_print_shadow(8, 129, buf, 18, 15);
+        vga_print_sm(8, 130, buf, 18);
     } else {
         vga_print_shadow(8, 129,
                          in_bus ? "ARV EQUIP BAY:" : "GROUND ITEMS:",
                          96, 15);
-        vga_print(96, 129, "DRAG TO SLOTS / R-CLICK UNEQUIP", 80);
+        vga_print_sm(100, 130, "DRAG TO SLOTS / R-CLICK UNEQUIP", 80);
     }
 
     /* 2 Rows x 6 Columns of Scrollable Equipment Cells */
@@ -753,22 +757,23 @@ static void render_inv_modal(void) {
                 int res = campaign_is_item_researched(id);
                 const ItemDef *d = item_get_def(id);
                 vga_rect_bevel(cx, cy, 45, 25, is_hov ? 75 : 13, is_hov ? 96 : 68, 15);
-                vga_blit_ui(cx + 1, cy + 1, ITEM_ICON_W, ITEM_ICON_H, spr_item_icons[id]);
+                vga_blit_ui(cx + 2, cy + 1, ITEM_ICON_W, ITEM_ICON_H, spr_item_icons[id]);
                 if (in_bus) {
                     int qx;
-                    snprintf(buf, sizeof(buf), "x%d", qty);
-                    qx = cx + 44 - (int)strlen(buf) * 6;
-                    vga_rect_fill(qx - 1, cy + 1, (int)strlen(buf) * 6 + 1, 8, is_hov ? 75 : 13);
-                    vga_print(qx, cy + 2, buf, 18);
+                    snprintf(buf, sizeof(buf), "X%d", qty);
+                    qx = cx + 43 - vga_text_width_sm(buf);
+                    vga_rect_fill(qx - 1, cy + 1, vga_text_width_sm(buf) + 1, 7, is_hov ? 75 : 13);
+                    vga_print_sm(qx, cy + 2, buf, 18);
                 } else if (tray_src[idx] >= 0 && tray_src[idx] < MAX_GND_ITEMS &&
                            g_map[u->z][u->y][u->x].gnd_prime[tray_src[idx]] >= 0) {
                     draw_slot_prime_badge(cx + 31, cy + 1,
                                           g_map[u->z][u->y][u->x].gnd_prime[tray_src[idx]]);
                 } else if (tray_src[idx] >= 100) {
-                    vga_rect_fill(cx + 25, cy + 1, 19, 8, is_hov ? 75 : 13);
-                    vga_print(cx + 26, cy + 2, "CRP", 33);
+                    vga_rect_fill(cx + 30, cy + 1, 14, 7, is_hov ? 75 : 13);
+                    vga_print_sm(cx + 31, cy + 2, "CRP", 33);
                 }
-                vga_print(cx + 2, cy + 17, d->short_name, res ? 96 : 8);
+                vga_print_sm(cx + (45 - vga_text_width_sm(d->short_name)) / 2, cy + 18,
+                             d->short_name, res ? 96 : 8);
             } else {
                 vga_rect_bevel(cx, cy, 45, 25, 13, 12, 15);
             }
@@ -932,7 +937,18 @@ static void execute_inv_drop(Unit *u, int in_bus, int dst_slot, int mx, int my) 
             item_is_ammo(item_id) && item_is_weapon(dst_item) &&
             item_get_def(dst_item)->ammo_item_id == item_id) {
             int max_clip = item_get_def(dst_item)->clip_size;
+            int rtu = item_get_def(dst_item)->reload_tu;
+            if (rtu <= 0) rtu = 3;
             if (dst_ammo < max_clip) {
+                if (!g_battle.pre_mission_equip) {
+                    if (u->tu < rtu) {
+                        snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),
+                                 "NOT ENOUGH TUs TO RELOAD (%d TU)!", rtu);
+                        sfx_beep(200, 50);
+                        return;
+                    }
+                    u->tu -= rtu;
+                }
                 if (src_slot >= SLOT_TRAY_BASE) {
                     consume_tray_source(u, item_id, tray_src);
                 } else {
@@ -1027,13 +1043,27 @@ void hud_update_inventory(void) {
                 tslot = hslot;
             }
         }
-        if (tslot >= 0 && tslot < SLOT_OPERATIVE_COUNT &&
-            item_is_grenade(get_unit_slot_item(u, tslot, NULL))) {
-            u->slot_prime[tslot] = (int8_t)(g_input.last_key - '0');
-            g_prime_target_slot  = -1;
-            g_input.last_key     = 0;
-            sfx_click();
-            return;
+        if (tslot >= 0 && tslot < SLOT_OPERATIVE_COUNT) {
+            int gid = get_unit_slot_item(u, tslot, NULL);
+            if (item_is_grenade(gid)) {
+                int ptu = item_get_def(gid)->prime_tu;
+                if (ptu <= 0) ptu = 3;
+                if (!g_battle.pre_mission_equip && u->slot_prime[tslot] < 0) {
+                    if (u->tu < ptu) {
+                        snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),
+                                 "NOT ENOUGH TUs TO PRIME (%d TU)!", ptu);
+                        g_input.last_key = 0;
+                        sfx_beep(200, 50);
+                        return;
+                    }
+                    u->tu -= ptu;
+                }
+                u->slot_prime[tslot] = (int8_t)(g_input.last_key - '0');
+                g_prime_target_slot  = -1;
+                g_input.last_key     = 0;
+                sfx_click();
+                return;
+            }
         }
     }
 
@@ -1082,9 +1112,21 @@ void hud_update_inventory(void) {
     if (g_prime_target_slot >= 0 && g_prime_target_slot < SLOT_OPERATIVE_COUNT &&
         my >= 127 && my < 138) {
         int t;
+        int gid = get_unit_slot_item(u, g_prime_target_slot, NULL);
+        int ptu = item_is_grenade(gid) ? item_get_def(gid)->prime_tu : 3;
+        if (ptu <= 0) ptu = 3;
         for (t = 0; t <= 6; t++) {
             int bx = 80 + t * 28;
             if (mx >= bx && mx < bx + 25) {
+                if (!g_battle.pre_mission_equip && u->slot_prime[g_prime_target_slot] < 0) {
+                    if (u->tu < ptu) {
+                        snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),
+                                 "NOT ENOUGH TUs TO PRIME (%d TU)!", ptu);
+                        sfx_beep(200, 50);
+                        return;
+                    }
+                    u->tu -= ptu;
+                }
                 u->slot_prime[g_prime_target_slot] = (int8_t)t;
                 g_prime_target_slot = -1;
                 sfx_click();
@@ -1186,6 +1228,24 @@ void hud_update_inventory(void) {
                     g_prime_target_slot = SLOT_RHAND;
                     sfx_beep(200, 50);
                 }
+            } else if (id == ITEM_MEDKIT) {
+                u->active_hand          = 0;
+                g_battle.fire_mode      = 7;
+                g_battle.inv_modal_open = 0;
+                snprintf(g_battle.status_msg, sizeof(g_battle.status_msg), "MEDKIT: L-CLICK SELF OR ADJACENT OPERATIVE!");
+                sfx_click();
+            } else if (id == ITEM_STUN_ROD) {
+                u->active_hand          = 0;
+                g_battle.fire_mode      = 8;
+                g_battle.inv_modal_open = 0;
+                snprintf(g_battle.status_msg, sizeof(g_battle.status_msg), "STUN ROD: L-CLICK ADJACENT TARGET!");
+                sfx_click();
+            } else if (id == ITEM_MIND_PROBE) {
+                u->active_hand          = 0;
+                g_battle.fire_mode      = 9;
+                g_battle.inv_modal_open = 0;
+                snprintf(g_battle.status_msg, sizeof(g_battle.status_msg), "MIND PROBE: L-CLICK VISIBLE ALIEN!");
+                sfx_click();
             } else if (id == ITEM_FLARE) {
                 g_battle.fire_mode      = 5;
                 g_battle.inv_modal_open = 0;
@@ -1225,6 +1285,24 @@ void hud_update_inventory(void) {
                     g_prime_target_slot = SLOT_LHAND;
                     sfx_beep(200, 50);
                 }
+            } else if (id == ITEM_MEDKIT) {
+                u->active_hand          = 1;
+                g_battle.fire_mode      = 7;
+                g_battle.inv_modal_open = 0;
+                snprintf(g_battle.status_msg, sizeof(g_battle.status_msg), "MEDKIT: L-CLICK SELF OR ADJACENT OPERATIVE!");
+                sfx_click();
+            } else if (id == ITEM_STUN_ROD) {
+                u->active_hand          = 1;
+                g_battle.fire_mode      = 8;
+                g_battle.inv_modal_open = 0;
+                snprintf(g_battle.status_msg, sizeof(g_battle.status_msg), "STUN ROD: L-CLICK ADJACENT TARGET!");
+                sfx_click();
+            } else if (id == ITEM_MIND_PROBE) {
+                u->active_hand          = 1;
+                g_battle.fire_mode      = 9;
+                g_battle.inv_modal_open = 0;
+                snprintf(g_battle.status_msg, sizeof(g_battle.status_msg), "MIND PROBE: L-CLICK VISIBLE ALIEN!");
+                sfx_click();
             } else if (id == ITEM_FLARE) {
                 g_battle.fire_mode      = 5;
                 g_battle.inv_modal_open = 0;
@@ -1350,6 +1428,9 @@ void hud_render(void) {
         int icon_item = (g_battle.fire_mode == 4) ? ((u->grenade_id >= 0) ? u->grenade_id : ITEM_FRAG_GRENADE)
                       : (g_battle.fire_mode == 5) ? ITEM_FLARE
                       : (g_battle.fire_mode == 6) ? g_battle.throw_item_id
+                      : (g_battle.fire_mode == 7) ? ITEM_MEDKIT
+                      : (g_battle.fire_mode == 8) ? ITEM_STUN_ROD
+                      : (g_battle.fire_mode == 9) ? ITEM_MIND_PROBE
                       : hand_item;
         vga_rect_bevel(4, 156, 44, 38, bg, (wep_hov || g_battle.fire_mode) ? 96 : 163, 172);
         if (icon_item >= 0 && icon_item < ITEM_COUNT)
@@ -1380,8 +1461,10 @@ void hud_render(void) {
                 vga_print(8, 185, "HAND", 14);
             }
         } else {
-            static const char *f_names[7] = {"MOVE", "SNAP", "AIMED", "AUTO", "GREN", "FLARE", "THROW"};
-            vga_print(8, 158, f_names[g_battle.fire_mode % 7], 96);
+            static const char *f_names[10] = {
+                "MOVE", "SNAP", "AIMED", "AUTO", "GREN", "FLARE", "THROW", "MEDKT", "STUN", "PROBE"
+            };
+            vga_print(8, 158, f_names[g_battle.fire_mode % 10], 96);
             vga_print(8, 185, "AIM!", 0);
         }
     }
@@ -1395,6 +1478,11 @@ void hud_render(void) {
     vga_rect_bevel(90, 156, 111, 38, 169, 172, 163);
     operative_draw_rank_badge(93, 158, u->rank);
     vga_print_shadow(104, 158, u->name, 96, 15);
+    if (!u->is_drone && u->morale < 100) {
+        char m_str[16];
+        snprintf(m_str, sizeof(m_str), "M%d", (int)u->morale);
+        vga_print(176, 158, m_str, (u->morale < 50) ? 33 : 80);
+    }
 
     draw_stat_bar(93, 167, "TU", u->tu,     u->tu_max,     18);  /* Bright Green TU */
     draw_stat_bar(93, 175, "HP", u->hp,     u->hp_max,     33);  /* Bright Red Health */
@@ -1482,7 +1570,8 @@ void hud_render(void) {
                 uint8_t tc = hov ? 96 : 1;
                 if (row == 1) {
                     if (pr < 0) {
-                        snprintf(opt_buf, sizeof(opt_buf), "UNPRIMED (PICK 0-6)");
+                        snprintf(opt_buf, sizeof(opt_buf), "UNPRIMED (%dTU TO PRM)",
+                                 item_get_def(hand_item)->prime_tu > 0 ? item_get_def(hand_item)->prime_tu : 3);
                         tc = 113;
                     } else if (pr == 0) {
                         snprintf(opt_buf, sizeof(opt_buf), "PRIMED: 0T (IMPACT!)");
@@ -1537,14 +1626,23 @@ void hud_render(void) {
                 vga_print_shadow(POPUP_X + 6, ry + 4, opt_buf, tc, 15);
             }
         } else {
-            /* Active hand holds a Flare, Clip, or is Empty */
+            /* Active hand holds Medkit, Stun Rod, Mind Probe, Flare, Clip, or is Empty */
             for (row = 0; row < 5; row++) {
                 int ry = POPUP_Y + 20 + row * 15;
                 int hov = (g_input.mx >= POPUP_X + 3 && g_input.mx < POPUP_X + POPUP_W - 3 &&
                            g_input.my >= ry && g_input.my < ry + 14);
                 uint8_t tc = hov ? 96 : 1;
                 if (row == 0) {
-                    if (hand_item == ITEM_FLARE) {
+                    if (hand_item == ITEM_MEDKIT) {
+                        snprintf(opt_buf, sizeof(opt_buf), "USE MEDKIT    (10TU)");
+                        tc = 18;
+                    } else if (hand_item == ITEM_STUN_ROD) {
+                        snprintf(opt_buf, sizeof(opt_buf), "STUN ROD MELEE(14TU)");
+                        tc = 144;
+                    } else if (hand_item == ITEM_MIND_PROBE) {
+                        snprintf(opt_buf, sizeof(opt_buf), "PSIONIC PROBE (20TU)");
+                        tc = (u->psi_trained >= 2) ? 96 : 33;
+                    } else if (hand_item == ITEM_FLARE) {
                         snprintf(opt_buf, sizeof(opt_buf), "THROW E-FLARE  (8TU)");
                     } else if (hand_item >= 0) {
                         snprintf(opt_buf, sizeof(opt_buf), "THROW ITEM    (10TU)");
@@ -1553,16 +1651,26 @@ void hud_render(void) {
                         tc = hov ? 96 : 7;
                     }
                 } else if (row == 1) {
-                    snprintf(opt_buf, sizeof(opt_buf), "SWITCH R/L HAND TAB");
-                    tc = 80;
+                    if (hand_item == ITEM_MEDKIT) {
+                        snprintf(opt_buf, sizeof(opt_buf), "HEAL SELF NOW (10TU)");
+                        tc = 96;
+                    } else {
+                        snprintf(opt_buf, sizeof(opt_buf), "SWITCH R/L HAND TAB");
+                        tc = 80;
+                    }
                 } else if (row == 2) {
                     snprintf(opt_buf, sizeof(opt_buf), "OPEN INVENTORY   [I]");
                 } else if (row == 3) {
-                    snprintf(opt_buf, sizeof(opt_buf), "FLARES CARRIED:  %2d", u->flares);
-                    tc = u->flares > 0 ? 18 : 8;
+                    snprintf(opt_buf, sizeof(opt_buf), "MORALE: %3d%%  BRV:%2d", u->morale, u->bravery);
+                    tc = (u->morale >= 50) ? 18 : 33;
                 } else {
-                    snprintf(opt_buf, sizeof(opt_buf), "GRENS CARRIED:   %2d", u->grenades);
-                    tc = u->grenades > 0 ? 96 : 8;
+                    if (u->psi_trained >= 2) {
+                        snprintf(opt_buf, sizeof(opt_buf), "PSIONIC SKILL:   %2d", u->psi_skill);
+                        tc = 144;
+                    } else {
+                        snprintf(opt_buf, sizeof(opt_buf), "GRENS:%d   FLARES:%d", u->grenades, u->flares);
+                        tc = 80;
+                    }
                 }
                 vga_rect_bevel(POPUP_X + 3, ry, POPUP_W - 6, 14,
                                hov ? 65 : 76, hov ? 96 : 68, 79);
@@ -1632,7 +1740,18 @@ int hud_handle_click(int mx, int my, int right_click) {
                 if (item_is_grenade(hand_item)) {
                     if (row == 0) {
                         int t = (mx - (POPUP_X + 37)) / 15;
+                        int ptu = item_get_def(hand_item)->prime_tu;
+                        if (ptu <= 0) ptu = 3;
                         if (t >= 0 && t <= 6) {
+                            if (u->slot_prime[hand_slot] < 0) {
+                                if (u->tu < ptu) {
+                                    snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),
+                                             "NOT ENOUGH TUs TO PRIME (%d TU)!", ptu);
+                                    sfx_beep(200, 50);
+                                    return 1;
+                                }
+                                u->tu -= ptu;
+                            }
                             u->slot_prime[hand_slot] = (int8_t)t;
                             snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),
                                      t == 0 ? "GRENADE PRIMED: 0 TURNS (IMPACT/DEATH)!"
@@ -1705,7 +1824,34 @@ int hud_handle_click(int mx, int my, int right_click) {
                         return 1;
                     }
                 } else {
-                    if (row == 0 && hand_item == ITEM_FLARE) {
+                    if (row == 0 && hand_item == ITEM_MEDKIT) {
+                        g_battle.fire_mode        = 7;
+                        g_battle.weapon_menu_open = 0;
+                        snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),
+                                 "MEDKIT: L-CLICK SELF OR ADJACENT OPERATIVE!");
+                        sfx_click();
+                        return 1;
+                    } else if (row == 1 && hand_item == ITEM_MEDKIT) {
+                        g_battle.fire_mode        = 7;
+                        g_battle.weapon_menu_open = 0;
+                        g_battle.view_level       = u->z;
+                        isomap_fire_weapon(u->x, u->y);
+                        return 1;
+                    } else if (row == 0 && hand_item == ITEM_STUN_ROD) {
+                        g_battle.fire_mode        = 8;
+                        g_battle.weapon_menu_open = 0;
+                        snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),
+                                 "STUN ROD: L-CLICK ADJACENT TARGET!");
+                        sfx_click();
+                        return 1;
+                    } else if (row == 0 && hand_item == ITEM_MIND_PROBE) {
+                        g_battle.fire_mode        = 9;
+                        g_battle.weapon_menu_open = 0;
+                        snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),
+                                 "MIND PROBE: L-CLICK VISIBLE ALIEN!");
+                        sfx_click();
+                        return 1;
+                    } else if (row == 0 && hand_item == ITEM_FLARE) {
                         g_battle.fire_mode        = 5;
                         g_battle.weapon_menu_open = 0;
                         snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),

@@ -51,7 +51,7 @@ static const int rank_gain_hp[RANK_COUNT]  = { 0, 4, 4, 5, 5, 7 }; /* +25 HP tot
 static const int rank_gain_en[RANK_COUNT]  = { 0, 5, 5, 5, 6, 8 }; /* +29 EN total  */
 static const int rank_gain_rcn[RANK_COUNT] = { 0, 6, 6, 7, 7, 9 }; /* +35 RCN total */
 
-static const char *default_starting_names[MAX_SQUAD_SIZE] = {
+static const char *default_starting_names[START_SQUAD_SIZE] = {
     "KELLER",
     "DECKER",
     "HARR",
@@ -59,7 +59,7 @@ static const char *default_starting_names[MAX_SQUAD_SIZE] = {
     "BARBER"
 };
 
-static const int default_starting_genders[MAX_SQUAD_SIZE] = {
+static const int default_starting_genders[START_SQUAD_SIZE] = {
     0,  /* KELLER: Male   */
     1,  /* DECKER: Female */
     0,  /* HARR:   Male   */
@@ -180,6 +180,7 @@ int operative_rank_for_xp(int xp) {
 }
 
 int operative_kill_xp(int alien_unit_type) {
+    if (alien_unit_type >= 4) return XP_KILL_CRYPTID;
     if (alien_unit_type == 3) return XP_KILL_MUTON;
     if (alien_unit_type == 2) return XP_KILL_FLOATER;
     return XP_KILL_SECTOID;
@@ -206,20 +207,22 @@ void operative_init_rookie(Operative *op, const char *raw_name,
 
     if (!op) return;
     memset(op, 0, sizeof(*op));
-    op->active = 1;
-    op->gender = gender ? 1 : 0;
-    op->portrait_id = portrait_id;
+    op->active       = 1;
+    op->assigned_arv = 1;
+    op->gender       = gender ? 1 : 0;
+    op->portrait_id  = portrait_id;
     /* Default starting weapon is always a researched human ballistic weapon */
-    op->weapon_id   = (weapon_id >= 0 && item_is_weapon(weapon_id)) ? weapon_id : ITEM_ASSAULT_RIFLE;
-    op->sidearm_id  = ITEM_PISTOL;
-    op->extra_clips = 2;
-    op->grenade_id  = ITEM_FRAG_GRENADE;
-    op->grenades    = 2;
-    op->flares      = 2;
-    op->rank = RANK_ROOKIE;
-    op->xp = 0;
-    op->kills = 0;
-    op->missions = 0;
+    op->weapon_id    = (weapon_id >= 0 && item_is_weapon(weapon_id)) ? weapon_id : ITEM_ASSAULT_RIFLE;
+    op->sidearm_id   = ITEM_PISTOL;
+    op->extra_clips  = 2;
+    op->grenade_id   = ITEM_FRAG_GRENADE;
+    op->grenades     = 2;
+    op->flares       = 2;
+    op->special_id   = ITEM_NONE;
+    op->rank         = RANK_ROOKIE;
+    op->xp           = 0;
+    op->kills        = 0;
+    op->missions     = 0;
 
     clean = operative_strip_rank_prefix(raw_name);
     while (clean[i] != '\0' && clean[i] != '\r' && clean[i] != '\n' && i + 1 < sizeof(op->name)) {
@@ -235,12 +238,16 @@ void operative_init_rookie(Operative *op, const char *raw_name,
     }
 
     /* Classic X-COM Rookie baseline stats with slight individual talent variation */
-    op->tu_max     = 52 + (rand() % 3); /* 52..54 Base TU (58..60 with HQ Arcade Rec Room) */
-    op->hp_max     = 40 + (rand() % 4); /* 40..43 Base HP (55..58 with HQ Medbay)          */
-    op->energy_max = 55 + (rand() % 4); /* 55..58 Stamina                                  */
-    op->firing_acc = 56 + (rand() % 4); /* 56..59% Base Aim                                */
-    op->throw_acc  = 54 + (rand() % 6); /* 54..59% Base Throwing Accuracy                  */
-    op->reactions  = 44 + (rand() % 5); /* 44..48 Reaction Initiative                      */
+    op->tu_max         = 52 + (rand() % 3); /* 52..54 Base TU (58..60 with HQ Arcade Rec Room) */
+    op->hp_max         = 40 + (rand() % 4); /* 40..43 Base HP (55..58 with HQ Medbay)          */
+    op->energy_max     = 55 + (rand() % 4); /* 55..58 Stamina                                  */
+    op->firing_acc     = 56 + (rand() % 4); /* 56..59% Base Aim                                */
+    op->throw_acc      = 54 + (rand() % 6); /* 54..59% Base Throwing Accuracy                  */
+    op->reactions      = 44 + (rand() % 5); /* 44..48 Reaction Initiative                      */
+    op->bravery        = 60 + (rand() % 30);/* 60..89 Morale Resilience                        */
+    op->psi_skill      = 30 + (rand() % 66);/* 30..95 Hidden Psionic Ability (until trained)   */
+    op->psi_trained    = 0;                 /* 0 = Untrained / Hidden                          */
+    op->psi_hours_left = 0;
 }
 
 int operative_add_xp(Operative *op, int xp_gain) {
@@ -267,8 +274,10 @@ void operative_load_starting_squad(Operative *squad, int squad_count) {
     int male_pool[6] = { 0, 1, 2, 3, 4, 5 };
     int fem_pool[6]  = { 6, 7, 8, 9, 10, 11 };
     int m_idx = 0, f_idx = 0, i;
+    int init_cnt = (squad_count < START_SQUAD_SIZE) ? squad_count : START_SQUAD_SIZE;
 
     if (!squad || squad_count <= 0) return;
+    memset(squad, 0, sizeof(Operative) * (size_t)squad_count);
 
     /* Shuffle male & female portrait pools so each new game gives random gender-matched faces */
     for (i = 5; i > 0; i--) {
@@ -278,18 +287,13 @@ void operative_load_starting_squad(Operative *squad, int squad_count) {
         int tf = fem_pool[i];  fem_pool[i]  = fem_pool[jf];  fem_pool[jf]  = tf;
     }
 
-    /* Starting operatives at the start of a new game are ALWAYS:
-     * 0: KELLER (Male, random male face)
-     * 1: DECKER (Female, random female face)
-     * 2: HARR   (Male, random male face)
-     * 3: LUCAS  (Male, random male face)
-     * 4: BARBER (Male, random male face)
-     * And all start with human Assault Rifles, Pistols & Frag Grenades! */
-    for (i = 0; i < squad_count; i++) {
-        int idx  = i % MAX_SQUAD_SIZE;
-        int g    = default_starting_genders[idx];
+    /* Starting operatives at the start of a new game are ALWAYS the 5 core veterans:
+     * 0: KELLER, 1: DECKER, 2: HARR, 3: LUCAS, 4: BARBER (slots 5..15 start empty for hiring!) */
+    for (i = 0; i < init_cnt; i++) {
+        int g    = default_starting_genders[i];
         int port = (g == 0) ? male_pool[m_idx++ % 6] : fem_pool[f_idx++ % 6];
-        operative_init_rookie(&squad[i], default_starting_names[idx], g, port, ITEM_ASSAULT_RIFLE);
+        operative_init_rookie(&squad[i], default_starting_names[i], g, port, ITEM_ASSAULT_RIFLE);
+        squad[i].assigned_arv = 1;
     }
 }
 
@@ -366,7 +370,7 @@ void operative_record_memorial(MemorialEntry *memorial, int max_entries,
 
     memset(&memorial[slot], 0, sizeof(MemorialEntry));
     memorial[slot].active = 1;
-    strncpy(memorial[slot].name, fallen->name, OP_NAME_LEN - 1);
+    snprintf(memorial[slot].name, sizeof(memorial[slot].name), "%s", fallen->name);
     memorial[slot].rank        = fallen->rank;
     memorial[slot].gender      = fallen->gender;
     memorial[slot].portrait_id = fallen->portrait_id;

@@ -17,7 +17,7 @@
 #define FX_W     24
 #define FX_H     24
 
-#define NUM_UNIT_SPRITES 15
+#define NUM_UNIT_SPRITES 19
 #define NUM_PORTRAITS    12
 
 /* Unit Sprite Sheet Row Groups (each has 4 poses x 8 directions of 24x32) */
@@ -36,7 +36,11 @@ enum {
     UNIT_SPR_CIV_MALE_WORK,  /* Male Civilian 2: Olive Work Vest & Cyan Shirt */
     UNIT_SPR_CIV_FEM,        /* Female Civilian 0: Redhead Teal Diner/Windbreaker */
     UNIT_SPR_CIV_FEM_BLONDE, /* Female Civilian 1: Blonde Gold Cardigan & Jeans */
-    UNIT_SPR_CIV_FEM_DARK    /* Female Civilian 2: Dark Hair Berry Coat & Slacks */
+    UNIT_SPR_CIV_FEM_DARK,   /* Female Civilian 2: Dark Hair Berry Coat & Slacks */
+    UNIT_SPR_CRYPTID,        /* Alien Cryptid: Chitinous Bio-Weapon Melee Terror */
+    UNIT_SPR_ZOMBIE,         /* Infected Zombie: Mutated Hostile Operative/Civilian */
+    UNIT_SPR_QUAD_DRONE,     /* ARV Recon Quad-Copter w/ Onboard Assault Rifle */
+    UNIT_SPR_UFO_DRONE       /* ARV Alloy UFO Hover-Drone w/ Plasma Emitter */
 };
 
 /* Floor Tile IDs */
@@ -59,6 +63,7 @@ enum {
     FLOOR_UFO_ROOF_W,   /* Rounded alien saucer dome West corner cap */
     FLOOR_ARV_DECK,     /* Armored Response Vehicle diamond-plate interior troop deck */
     FLOOR_ARV_ROOF,     /* Armored Response Vehicle olive/gunmetal rooftop plating */
+    FLOOR_ARV_DRONE_PAD,/* ARV Front Rooftop Drone Launch & Recovery Pad */
     FLOOR_COUNT
 };
 
@@ -195,12 +200,18 @@ extern uint8_t spr_portraits[NUM_PORTRAITS][32 * 36];
 extern uint8_t spr_fullbody[NUM_PORTRAITS][FULLBODY_W * FULLBODY_H];
 extern uint8_t spr_weapons[4][40 * 24];
 
-/* Optional full-frame BMP graphic resources loaded from assets/*.BMP */
+/* Rotating ARV Roof Defense Turret Sprites: [0=Mk1 Laser, 1=Mk2 Plasma][dir 0..7] (24x32) */
+extern uint8_t spr_arv_turret[2][8][UNIT_W * UNIT_H];
+
+/* Optional full-frame BMP graphic resources loaded from the assets directory */
 extern uint8_t *gfx_title_bg;   /* 320x200 Title Screen artwork (TITLEBG.BMP) */
 extern uint8_t *gfx_hidden_bg;  /* Hidden Movement artwork (HIDDEN.BMP) */
 extern int      gfx_hidden_w;   /* Width of loaded HIDDEN.BMP */
 extern int      gfx_hidden_h;   /* Height of loaded HIDDEN.BMP */
 extern uint8_t *gfx_radar_bg;   /* 300x132 Full-Width Lehigh Valley Radar Map (RADAR.BMP) */
+extern uint8_t *gfx_modal_bg;   /* 248x116 Command Center Event Modal background (MODAL.BMP) */
+extern int      gfx_modal_w;
+extern int      gfx_modal_h;
 
 void gfx_init_assets(void);
 int  gfx_portrait_to_unit_sprite(int portrait_id);

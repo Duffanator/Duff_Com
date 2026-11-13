@@ -21,12 +21,16 @@ uint8_t spr_splash[SPLASH_TYPE_COUNT][4][FX_W * FX_H];
 uint8_t spr_portraits[NUM_PORTRAITS][32 * 36];
 uint8_t spr_fullbody[NUM_PORTRAITS][FULLBODY_W * FULLBODY_H];
 uint8_t spr_weapons[4][40 * 24];
+uint8_t spr_arv_turret[2][8][UNIT_W * UNIT_H];
 
 uint8_t *gfx_title_bg  = NULL;
 uint8_t *gfx_hidden_bg = NULL;
 int      gfx_hidden_w  = 0;
 int      gfx_hidden_h  = 0;
 uint8_t *gfx_radar_bg  = NULL;
+uint8_t *gfx_modal_bg  = NULL;
+int      gfx_modal_w   = 0;
+int      gfx_modal_h   = 0;
 
 /* Helper: check if pixel (x,y) is inside a 32x16 isometric diamond */
 static int in_diamond(int x, int y) {
@@ -165,6 +169,21 @@ static void build_floors(void) {
                             col = 21; /* Structural roof rib */
                         else
                             col = (uint8_t)(23 + (hash & 1)); /* Olive-drab armored roof */
+                        break;
+                    }
+
+                    case FLOOR_ARV_DRONE_PAD: {
+                        int dx_c = abs(x - 16);
+                        int dy_c = abs(y - 8) * 2;
+                        int dist = dx_c + dy_c;
+                        if (is_diamond_edge(x, y))
+                            col = ((x + y) & 2) ? 97 : 14; /* Hazard yellow/black landing rim */
+                        else if (dist == 9 || dist == 10)
+                            col = 80; /* Glowing cyan magnetic launch ring */
+                        else if ((dx_c == 3 && dy_c <= 4) || (dy_c <= 1 && dx_c <= 3))
+                            col = 96; /* Bright gold 'H' helipad marker */
+                        else
+                            col = (uint8_t)(10 + (hash & 1)); /* Dark gunmetal launch deck */
                         break;
                     }
                 }
@@ -1114,7 +1133,7 @@ static void build_units(void) {
                     dst[(15 + y_off) * UNIT_W + 16] = 144;
                     dst[(15 + y_off) * UNIT_W + 17] = 145;
                     dst[(16 + y_off) * UNIT_W + 16] = 144;
-                } else {
+                } else if (type >= UNIT_SPR_CIV_MALE && type <= UNIT_SPR_CIV_FEM_DARK) {
                     /* COOPERSBURG LOCAL CIVILIANS (Fallback for 9..14, overridden by UNITS.BMP) */
                     int c_idx = type - UNIT_SPR_CIV_MALE;
                     int is_fem = (c_idx >= 3);
@@ -1173,6 +1192,149 @@ static void build_units(void) {
                         dst[(9 + y_off) * UNIT_W + ex]     = 14;
                         dst[(9 + y_off) * UNIT_W + ex + 1] = 14;
                     }
+                } else if (type == UNIT_SPR_CRYPTID) {
+                    /* CRYPTID: Chitinous obsidian/crimson bio-weapon terror beast w/ scythe claws */
+                    static const int dx_tab[8] = { 0,  5,  7,  5,  0, -5, -7, -5};
+                    static const int dy_tab[8] = {-4, -3,  0,  3,  4,  3,  0, -3};
+                    int s;
+                    /* Digitigrade chitin legs */
+                    for (y = 19 + (pose == 1 ? 2 : 0); y < 28; y++) {
+                        int lx = 7 + (leg_l_off / 2);
+                        int rx = 15 + (leg_r_off / 2);
+                        dst[y * UNIT_W + lx]     = 12;
+                        dst[y * UNIT_W + lx + 1] = 38;
+                        dst[y * UNIT_W + rx]     = 38;
+                        dst[y * UNIT_W + rx + 1] = 12;
+                    }
+                    /* Hunched ribbed carapace torso */
+                    for (y = 10 + y_off; y < 20 + (pose == 1 ? 2 : 0); y++) {
+                        for (x = 6; x <= 17; x++) {
+                            dst[y * UNIT_W + x] = ((y + x) & 1) ? 12 : ((y % 3 == 0) ? 35 : 42);
+                        }
+                    }
+                    /* Elongated predatory crest head & neon-green compound eyes */
+                    for (y = 4 + y_off; y < 11 + y_off; y++) {
+                        for (x = 7; x <= 16; x++) {
+                            dst[y * UNIT_W + x] = (y == 4 + y_off || x == 7 || x == 16) ? 35 : 13;
+                        }
+                    }
+                    dst[(7 + y_off) * UNIT_W + 9]  = 144;
+                    dst[(7 + y_off) * UNIT_W + 10] = 96;
+                    dst[(7 + y_off) * UNIT_W + 13] = 96;
+                    dst[(7 + y_off) * UNIT_W + 14] = 144;
+                    /* Twin bone-white / crimson scythe talons lunging toward `dir` */
+                    for (s = 1; s <= 5; s++) {
+                        int cx1 = 9  + (dx_tab[dir] * s) / 4;
+                        int cy1 = 14 + y_off + (dy_tab[dir] * s) / 4;
+                        int cx2 = 14 + (dx_tab[dir] * s) / 4;
+                        int cy2 = 14 + y_off + (dy_tab[dir] * s) / 4;
+                        uint8_t cc = (s >= 4) ? 2 : 34;
+                        if ((unsigned)cx1 < UNIT_W && (unsigned)cy1 < UNIT_H) dst[cy1 * UNIT_W + cx1] = cc;
+                        if ((unsigned)cx2 < UNIT_W && (unsigned)cy2 < UNIT_H) dst[cy2 * UNIT_W + cx2] = cc;
+                    }
+                } else if (type == UNIT_SPR_ZOMBIE) {
+                    /* ZOMBIE: Infected shambling host w/ necrotic green flesh & bloodstained clothes */
+                    static const int dx_tab[8] = { 0,  4,  5,  4,  0, -4, -5, -4};
+                    static const int dy_tab[8] = {-3, -2,  0,  2,  3,  2,  0, -2};
+                    int s;
+                    for (y = 20 + (pose == 1 ? 2 : 0); y < 28; y++) {
+                        int lx = 9 + (leg_l_off / 2);
+                        int rx = 13 + (leg_r_off / 2);
+                        dst[y * UNIT_W + lx]     = 25;
+                        dst[y * UNIT_W + lx + 1] = 11;
+                        dst[y * UNIT_W + rx]     = 11;
+                        dst[y * UNIT_W + rx + 1] = 25;
+                    }
+                    /* Tattered blood-soaked torso */
+                    for (y = 12 + y_off; y < 21 + (pose == 1 ? 2 : 0); y++) {
+                        for (x = 8; x <= 15; x++) {
+                            dst[y * UNIT_W + x] = ((x + y) % 4 == 0) ? 35 : 24;
+                        }
+                    }
+                    /* Mutated necrotic green head & glowing red eyes */
+                    for (y = 6 + y_off; y < 12 + y_off; y++) {
+                        for (x = 9; x <= 14; x++) {
+                            dst[y * UNIT_W + x] = (y == 6 + y_off) ? 22 : 20;
+                        }
+                    }
+                    dst[(8 + y_off) * UNIT_W + 10] = 33;
+                    dst[(8 + y_off) * UNIT_W + 13] = 33;
+                    dst[(10 + y_off) * UNIT_W + 11] = 36;
+                    dst[(10 + y_off) * UNIT_W + 12] = 36;
+                    /* Outstretched zombie arms reaching in `dir` */
+                    for (s = 1; s <= 4; s++) {
+                        int ax1 = 9  + (dx_tab[dir] * s) / 4;
+                        int ay1 = 14 + y_off + (dy_tab[dir] * s) / 4;
+                        int ax2 = 14 + (dx_tab[dir] * s) / 4;
+                        int ay2 = 14 + y_off + (dy_tab[dir] * s) / 4;
+                        if ((unsigned)ax1 < UNIT_W && (unsigned)ay1 < UNIT_H) dst[ay1 * UNIT_W + ax1] = 20;
+                        if ((unsigned)ax2 < UNIT_W && (unsigned)ay2 < UNIT_H) dst[ay2 * UNIT_W + ax2] = 20;
+                    }
+                } else if (type == UNIT_SPR_QUAD_DRONE) {
+                    /* ARV QUAD-COPTER RECON DRONE: Hovering 4-rotor tactical drone w/ assault rifle */
+                    static const int dx_tab[8] = { 0,  4,  6,  4,  0, -4, -6, -4};
+                    static const int dy_tab[8] = {-4, -3,  0,  3,  4,  3,  0, -3};
+                    int bob = ((pose & 1) ? -1 : 0) - 5;
+                    int s;
+                    /* Diagonal carbon-fiber rotor arms & 4 spinning rotor discs */
+                    for (s = -5; s <= 5; s++) {
+                        dst[(15 + bob + s / 2) * UNIT_W + (12 + s)] = 9;
+                        dst[(15 + bob - s / 2) * UNIT_W + (12 + s)] = 9;
+                    }
+                    for (x = 3; x <= 8; x++) {
+                        dst[(12 + bob) * UNIT_W + x] = ((x + pose) & 1) ? 4 : 80;
+                        dst[(18 + bob) * UNIT_W + x] = ((x + pose) & 1) ? 4 : 80;
+                    }
+                    for (x = 15; x <= 20; x++) {
+                        dst[(12 + bob) * UNIT_W + x] = ((x + pose) & 1) ? 80 : 4;
+                        dst[(18 + bob) * UNIT_W + x] = ((x + pose) & 1) ? 80 : 4;
+                    }
+                    /* Olive-drab & gunmetal central fuselage pod */
+                    for (y = 13 + bob; y <= 18 + bob; y++) {
+                        for (x = 8; x <= 15; x++) {
+                            dst[y * UNIT_W + x] = (y == 13 + bob) ? 21 : 23;
+                        }
+                    }
+                    dst[(15 + bob) * UNIT_W + 11] = 96;
+                    dst[(15 + bob) * UNIT_W + 12] = 80;
+                    /* Underslung 5.56mm rifle barrel pointing in `dir` */
+                    for (s = 1; s <= 5; s++) {
+                        int px = 12 + (dx_tab[dir] * s) / 4;
+                        int py = 18 + bob + (dy_tab[dir] * s) / 4;
+                        if ((unsigned)px < UNIT_W && (unsigned)py < UNIT_H)
+                            dst[py * UNIT_W + px] = (s == 5) ? 96 : 6;
+                    }
+                } else if (type == UNIT_SPR_UFO_DRONE) {
+                    /* ALLOY UFO HOVER-DRONE: Hovering alien saucer disc w/ twin plasma emitters */
+                    static const int dx_tab[8] = { 0,  4,  6,  4,  0, -4, -6, -4};
+                    static const int dy_tab[8] = {-4, -3,  0,  3,  4,  3,  0, -3};
+                    int bob = ((pose & 1) ? -1 : 0) - 6;
+                    int s;
+                    /* Saucer disc hull + glowing Elerium rim */
+                    for (y = 12 + bob; y <= 19 + bob; y++) {
+                        int rx = (y == 15 + bob || y == 16 + bob) ? 8 :
+                                 (y == 14 + bob || y == 17 + bob) ? 6 : 4;
+                        for (x = 12 - rx; x <= 12 + rx; x++) {
+                            if (y == 15 + bob || y == 16 + bob)
+                                dst[y * UNIT_W + x] = ((x + pose) & 1) ? 144 : 81;
+                            else if (y < 15 + bob)
+                                dst[y * UNIT_W + x] = 163;
+                            else
+                                dst[y * UNIT_W + x] = 133;
+                        }
+                    }
+                    /* Cyan sensor dome */
+                    for (x = 10; x <= 14; x++) {
+                        dst[(11 + bob) * UNIT_W + x] = 80;
+                        dst[(12 + bob) * UNIT_W + x] = 82;
+                    }
+                    /* Twin plasma emitter barrels pointing in `dir` */
+                    for (s = 2; s <= 5; s++) {
+                        int px = 12 + (dx_tab[dir] * s) / 4;
+                        int py = 17 + bob + (dy_tab[dir] * s) / 4;
+                        if ((unsigned)px < UNIT_W && (unsigned)py < UNIT_H)
+                            dst[py * UNIT_W + px] = (s == 5) ? 144 : 131;
+                    }
                 }
             }
         }
@@ -1198,6 +1360,18 @@ static void build_deaths(void) {
         } else if (type == UNIT_SPR_MUTON) {
             body_hi = 18;  body_sh = 21;
             head_c  = 131; leg_c   = 130; blood_c = 21;
+        } else if (type == UNIT_SPR_CRYPTID) {
+            body_hi = 35;  body_sh = 12;
+            head_c  = 144; leg_c   = 38;  blood_c = 18;
+        } else if (type == UNIT_SPR_ZOMBIE) {
+            body_hi = 24;  body_sh = 35;
+            head_c  = 20;  leg_c   = 25;  blood_c = 36;
+        } else if (type == UNIT_SPR_QUAD_DRONE) {
+            body_hi = 22;  body_sh = 9;
+            head_c  = 80;  leg_c   = 11;  blood_c = 96;
+        } else if (type == UNIT_SPR_UFO_DRONE) {
+            body_hi = 163; body_sh = 133;
+            head_c  = 81;  leg_c   = 131; blood_c = 144;
         } else {
             static const uint8_t c_hair[6]   = { 54, 98, 14, 36, 98, 14 };
             static const uint8_t c_jkt_hi[6] = { 114, 34, 21, 80, 96, 35 };
@@ -1570,6 +1744,90 @@ static void build_hud_sprites(void) {
     }
 }
 
+static void build_arv_turrets(void) {
+    /* 8 isometric direction vectors (0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW) */
+    static const int dx_tab[8] = {  0,  5,  7,  5,  0, -5, -7, -5 };
+    static const int dy_tab[8] = { -5, -3,  0,  3,  5,  3,  0, -3 };
+    static const int px_tab[8] = {  2,  1,  0, -1, -2, -1,  0,  1 };
+    static const int py_tab[8] = {  0,  1,  2,  1,  0, -1, -2, -1 };
+    int t, dir, x, y, s;
+
+    for (t = 0; t < 2; t++) {
+        for (dir = 0; dir < 8; dir++) {
+            uint8_t *dst = spr_arv_turret[t][dir];
+            uint8_t base_hi = (t == 0) ? 21 : 163;
+            uint8_t base_lo = (t == 0) ? 24 : 134;
+            uint8_t glow_c  = (t == 0) ? 80 : 144;
+            uint8_t brl_c   = (t == 0) ? 5  : 131;
+
+            memset(dst, COL_TRANS, UNIT_W * UNIT_H);
+
+            /* Armored rotating turret ring on ARV roof (y=19..25, x=5..18) */
+            for (y = 19; y <= 25; y++) {
+                for (x = 5; x <= 18; x++) {
+                    int d2 = (x - 12) * (x - 12) + (y - 22) * (y - 22) * 3;
+                    if (d2 <= 36) {
+                        if (d2 >= 26)
+                            dst[y * UNIT_W + x] = ((x + y) & 1) ? 97 : 12; /* Hazard turret ring */
+                        else
+                            dst[y * UNIT_W + x] = 9;
+                    }
+                }
+            }
+
+            /* Rotating Armored Turret Dome / Housing (y=11..20, x=6..17) */
+            for (y = 11; y <= 20; y++) {
+                for (x = 6; x <= 17; x++) {
+                    int d2 = (x - 12) * (x - 12) + (y - 16) * (y - 16) * 2;
+                    if (d2 <= 30) {
+                        if (y <= 13) dst[y * UNIT_W + x] = base_hi;
+                        else if (x == 6 || x == 17 || y == 20) dst[y * UNIT_W + x] = 14;
+                        else dst[y * UNIT_W + x] = base_lo;
+                    }
+                }
+            }
+
+            /* Top optical target acquisition sensor & glowing power core */
+            dst[12 * UNIT_W + 11] = 96;
+            dst[12 * UNIT_W + 12] = glow_c;
+            dst[13 * UNIT_W + 11] = glow_c;
+            dst[13 * UNIT_W + 12] = 0;
+
+            /* Twin Laser / Plasma Cannon Barrels rotating in `dir` */
+            for (s = 1; s <= 7; s++) {
+                int cx = 12 + (dx_tab[dir] * s) / 5;
+                int cy = 15 + (dy_tab[dir] * s) / 5;
+                int b1x = cx - px_tab[dir] / 2;
+                int b1y = cy - py_tab[dir] / 2;
+                int b2x = cx + px_tab[dir];
+                int b2y = cy + py_tab[dir];
+                uint8_t c = (s >= 6) ? glow_c : ((s == 5) ? 96 : brl_c);
+                if ((unsigned)b1x < UNIT_W && (unsigned)b1y < UNIT_H)
+                    dst[b1y * UNIT_W + b1x] = c;
+                if ((unsigned)b2x < UNIT_W && (unsigned)b2y < UNIT_H)
+                    dst[b2y * UNIT_W + b2x] = c;
+            }
+        }
+    }
+}
+
+static void build_modal_fallback(void) {
+    int mw = 236, mh = 104, x, y;
+    if (gfx_modal_bg) return;
+    gfx_modal_bg = (uint8_t *)malloc((size_t)(mw * mh));
+    if (!gfx_modal_bg) return;
+    gfx_modal_w = mw;
+    gfx_modal_h = mh;
+    for (y = 0; y < mh; y++) {
+        for (x = 0; x < mw; x++) {
+            uint8_t c = (y & 1) ? 77 : 78;
+            if ((x % 16 == 0) || (y % 16 == 0)) c = 75;
+            if (x < 3 || x >= mw - 3 || y < 3 || y >= mh - 3) c = 68;
+            gfx_modal_bg[y * mw + x] = c;
+        }
+    }
+}
+
 static void load_bmp_overrides(void) {
     uint8_t *sheet;
     int sw = 0, sh = 0, i, t, p, d;
@@ -1689,7 +1947,19 @@ static void load_bmp_overrides(void) {
         free(sheet);
     }
 
-    /* 6. Full-screen Title Background, Hidden Movement Poster & Radar Map */
+    /* 5c. ARV_TURR.BMP (8 cols [dir 0..7] x 2 rows [0=Mk1 Laser, 1=Mk2 Plasma] of 24x32) */
+    sheet = bmp_load_alloc("ARV_TURR.BMP", &sw, &sh);
+    if (sheet) {
+        for (t = 0; t < 2 && (t + 1) * UNIT_H <= sh; t++) {
+            for (d = 0; d < 8 && (d + 1) * UNIT_W <= sw; d++) {
+                bmp_extract_tile(sheet, sw, sh, d * UNIT_W, t * UNIT_H,
+                                 UNIT_W, UNIT_H, spr_arv_turret[t][d]);
+            }
+        }
+        free(sheet);
+    }
+
+    /* 6. Full-screen Title Background, Hidden Movement Poster, Radar Map & Command Modal */
     sheet = bmp_load_alloc("TITLEBG.BMP", &sw, &sh);
     if (sheet && sw == 320 && sh == 200) {
         gfx_title_bg = sheet;
@@ -1709,6 +1979,15 @@ static void load_bmp_overrides(void) {
     sheet = bmp_load_alloc("RADAR.BMP", &sw, &sh);
     if (sheet && sw == 300 && sh == 132) {
         gfx_radar_bg = sheet;
+    } else if (sheet) {
+        free(sheet);
+    }
+
+    sheet = bmp_load_alloc("MODAL.BMP", &sw, &sh);
+    if (sheet && sw > 0 && sw <= SCREEN_W && sh > 0 && sh <= SCREEN_H) {
+        gfx_modal_bg = sheet;
+        gfx_modal_w  = sw;
+        gfx_modal_h  = sh;
     } else if (sheet) {
         free(sheet);
     }
@@ -1734,7 +2013,9 @@ void gfx_init_assets(void) {
     build_deaths();
     build_fx();
     build_hud_sprites();
+    build_arv_turrets();
     load_bmp_overrides();
+    build_modal_fallback();
     items_init_assets();
 }
 

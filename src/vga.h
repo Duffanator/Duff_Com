@@ -54,10 +54,13 @@ void vga_rect_bevel(int x, int y, int w, int h, uint8_t fill_col, uint8_t hi_col
 void vga_blit_shaded(int dx, int dy, int w, int h, const uint8_t *src, int shade, int max_y);
 void vga_blit_ui(int dx, int dy, int w, int h, const uint8_t *src);
 
-/* Compact 5x7 & 6x8 bitmap font rendering */
+/* Compact 5x7 & 3x5 bitmap font rendering */
 void vga_print(int x, int y, const char *str, uint8_t col);
 void vga_print_shadow(int x, int y, const char *str, uint8_t col, uint8_t shadow_col);
 int  vga_text_width(const char *str);
+void vga_print_sm(int x, int y, const char *str, uint8_t col);
+void vga_print_sm_shadow(int x, int y, const char *str, uint8_t col, uint8_t shadow_col);
+int  vga_text_width_sm(const char *str);
 
 /* Save current backbuffer to a 24-bit BMP file for verification or screenshots */
 int  vga_save_bmp(const char *filename);

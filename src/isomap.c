@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-MapCell g_map[MAP_LEVS][MAP_H][MAP_W];
+MapCell g_map[MAP_LEVS][MAX_MAP_H][MAX_MAP_W];
 Unit g_units[MAX_UNITS];
 BattleState g_battle;
 PathResult g_preview_path;
@@ -27,12 +27,15 @@ static int last_prev_ux = -1, last_prev_uy = -1, last_prev_uz = -1;
 static int last_prev_cx = -1, last_prev_cy = -1, last_prev_cz = -1;
 static int combat_anim_depth = 0;
 
-static const char *default_squad_names[5] = {
+static const char *default_squad_names[8] = {
     "RKI. KELLER",
     "RKI. DECKER",
     "RKI. HARR",
     "RKI. LUCAS",
-    "RKI. BARBER"
+    "RKI. BARBER",
+    "RKI. VANCE",
+    "RKI. STERLING",
+    "RKI. REED"
 };
 
 static const char *biome_titles[BIOME_COUNT] = {
@@ -46,6 +49,7 @@ static const char *biome_titles[BIOME_COUNT] = {
 
 static void kill_unit(int victim_idx, int killer_idx);
 static void detonate_explosion(int cx, int cy, int cz, int attacker_idx);
+static void detonate_stun_explosion(int cx, int cy, int cz, int attacker_idx);
 static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int acc);
 
 void isomap_tile_to_screen(int tx, int ty, int tz, int *sx, int *sy) {
@@ -442,16 +446,21 @@ void isomap_init_unit_slots_from_summary(Unit *u) {
 }
 
 static int calc_mission_score(int squad_alive) {
-    int kia = MAX_SQUAD_SIZE - squad_alive;
+    int i, deployed = 0, kia = 0;
     int alien_civ_kills = g_battle.civilians_killed - g_battle.civilians_killed_by_xcom;
     int score = 0;
 
+    for (i = 0; i < MAX_SQUAD_SIZE; i++) {
+        if (g_units[i].name[0] != '\0') deployed++;
+    }
+    if (deployed < 1) deployed = 5;
+    kia = deployed - squad_alive;
     if (kia < 0) kia = 0;
     if (alien_civ_kills < 0) alien_civ_kills = 0;
 
     score += (g_battle.mission_ended == 1) ? 150 : (g_battle.mission_ended == 2 ? -150 : 0);
     score += squad_alive * 50 - kia * 100;
-    score += g_battle.aliens_killed * 40 + g_battle.corpses_recovered * 15;
+    score += g_battle.aliens_killed * 40 + g_battle.aliens_captured * 75 + g_battle.corpses_recovered * 15;
     score += (g_battle.nav_recovered + g_battle.cryo_recovered + g_battle.pods_recovered) * 25;
     score += g_battle.civilians_saved * 45;
     score -= alien_civ_kills * 35;
@@ -460,18 +469,46 @@ static int calc_mission_score(int squad_alive) {
     return score;
 }
 
+static int has_base_containment(void) {
+    int r, c;
+    for (r = 0; r < 3; r++) {
+        for (c = 0; c < 4; c++) {
+            if (g_camp.bunker_grid[r][c] == FAC_CONTAINMENT) return 1;
+        }
+    }
+    return 0;
+}
+
 static void check_victory_state(void) {
     int i, z, y, x, k, aliens_alive = 0, squad_alive = 0, civs_alive = 0;
     for (i = 0; i < MAX_UNITS; i++) {
-        if (!g_units[i].active) continue;
-        if (g_units[i].faction == FACTION_DUFFCOM) squad_alive++;
-        else if (g_units[i].faction == FACTION_ALIEN) aliens_alive++;
-        else if (g_units[i].faction == FACTION_CIVILIAN) civs_alive++;
+        if (!g_units[i].active || g_units[i].is_unconscious) continue;
+        if (g_units[i].orig_faction == FACTION_DUFFCOM && !g_units[i].is_zombie && !g_units[i].is_drone) {
+            squad_alive++;
+        } else if (g_units[i].orig_faction == FACTION_ALIEN || g_units[i].is_zombie) {
+            aliens_alive++;
+        } else if (g_units[i].faction == FACTION_CIVILIAN) {
+            civs_alive++;
+        }
     }
     g_battle.civilians_saved = civs_alive;
 
     if (aliens_alive == 0 && g_battle.mission_ended == 0) {
         int nav_cnt = 0, cryo_cnt = 0, pod_cnt = 0, core_cnt = 0, hull_cnt = 0, corpse_cnt = 0;
+        int live_cnt = 0;
+        /* Restore any mind-controlled DUFF-COM operatives when all aliens are neutralized */
+        for (i = 0; i < MAX_UNITS; i++) {
+            if (g_units[i].active && g_units[i].orig_faction == FACTION_DUFFCOM && !g_units[i].is_zombie) {
+                g_units[i].faction               = FACTION_DUFFCOM;
+                g_units[i].controlled_by_faction = FACTION_DUFFCOM;
+                g_units[i].mind_control_turns    = 0;
+            }
+            /* Unconscious operatives who haven't bled out are recovered alive at mission victory! */
+            if (g_units[i].orig_faction == FACTION_DUFFCOM && g_units[i].is_unconscious &&
+                !g_units[i].is_zombie && g_units[i].hp > 0) {
+                squad_alive++;
+            }
+        }
         for (z = 0; z < MAP_LEVS; z++) {
             for (y = 0; y < MAP_H; y++) {
                 for (x = 0; x < MAP_W; x++) {
@@ -497,7 +534,19 @@ static void check_victory_state(void) {
         }
 
         for (i = 0; i < MAX_UNITS; i++) {
-            if (g_units[i].is_corpse && g_units[i].faction == FACTION_ALIEN) corpse_cnt++;
+            if (g_units[i].orig_faction == FACTION_ALIEN && !g_units[i].is_zombie) {
+                if (g_units[i].is_unconscious && g_units[i].hp > 0) live_cnt++;
+                else if (g_units[i].is_corpse)                      corpse_cnt++;
+            }
+        }
+        g_battle.aliens_captured = live_cnt;
+        if (has_base_containment()) {
+            g_camp.debrief_live_captured       = live_cnt;
+            g_camp.debrief_died_no_containment = 0;
+        } else {
+            g_camp.debrief_live_captured       = 0;
+            g_camp.debrief_died_no_containment = live_cnt;
+            corpse_cnt += live_cnt;
         }
         g_battle.mission_ended     = 1;
         g_battle.nav_recovered     = nav_cnt;
@@ -514,7 +563,7 @@ static void check_victory_state(void) {
     } else if (squad_alive == 0 && g_battle.mission_ended == 0) {
         g_battle.mission_ended = 2;
         g_battle.mission_score = calc_mission_score(0);
-        set_status("SQUAD WIPED OUT! MISSION FAILED!");
+        set_status("ALL OPERATIVES DOWN! MISSION FAILED!");
     } else {
         g_battle.mission_score = calc_mission_score(squad_alive);
     }
@@ -575,6 +624,9 @@ static void spawn_unit(int idx, int faction, int type, const char *name,
     memset(u, 0, sizeof(*u));
     u->active = 1;
     u->faction = faction;
+    u->orig_faction = (uint8_t)faction;
+    u->controlled_by_faction = (uint8_t)faction;
+    u->roster_idx = (faction == FACTION_DUFFCOM) ? (int8_t)idx : -1;
     u->unit_type = type;
     strncpy(u->name, name, sizeof(u->name) - 1);
     u->portrait_id = portrait_id % NUM_PORTRAITS;
@@ -600,12 +652,14 @@ static void spawn_unit(int idx, int faction, int type, const char *name,
         u->grenades    = 0;
         u->flares      = 0;
     } else {
-        u->sprite_id = (type == 1) ? UNIT_SPR_SECTOID :
+        u->sprite_id = (type == 5) ? UNIT_SPR_CRYPTID :
+                       (type == 6) ? UNIT_SPR_ZOMBIE  :
+                       (type == 1) ? UNIT_SPR_SECTOID :
                        (type == 2) ? UNIT_SPR_FLOATER : UNIT_SPR_MUTON;
         items_roll_alien_loadout(type, g_camp.valley_day > 0 ? g_camp.valley_day : 1,
                                  &u->weapon_id, NULL, &u->ammo, &u->grenade_id, &u->grenades);
         u->sidearm_id  = ITEM_NONE;
-        u->extra_clips = 1;
+        u->extra_clips = (type >= 5) ? 0 : 1;
         u->flares      = 0;
     }
     u->x = x; u->y = y; u->z = z;
@@ -616,21 +670,24 @@ static void spawn_unit(int idx, int faction, int type, const char *name,
     u->xp_start = 0;
     u->xp_gained = 0;
     u->tu_max = (faction == FACTION_DUFFCOM) ? 53 :
-                (faction == FACTION_CIVILIAN ? 46 : (type == 3 ? 62 : 54));
+                (faction == FACTION_CIVILIAN ? 46 :
+                (type == 5 ? 90 : (type == 3 ? 62 : 54)));
     u->tu = u->tu_max;
     u->hp_max = (faction == FACTION_DUFFCOM) ? 41 :
-                (faction == FACTION_CIVILIAN ? 26 : (type == 3 ? 65 : (type == 2 ? 45 : 32)));
+                (faction == FACTION_CIVILIAN ? 26 :
+                (type == 5 ? 110 : (type == 3 ? 90 : (type == 2 ? 52 : 30))));
     u->hp = u->hp_max;
-    u->energy_max = (faction == FACTION_DUFFCOM) ? 56 : (faction == FACTION_CIVILIAN ? 48 : 60);
+    u->energy_max = (faction == FACTION_DUFFCOM) ? 56 : (faction == FACTION_CIVILIAN ? 48 : 65);
     u->base_energy_max = u->energy_max;
     u->energy = u->energy_max;
     u->morale = 100;
+    u->bravery = 60;
     u->firing_acc = (faction == FACTION_DUFFCOM) ? 57 :
                     (faction == FACTION_CIVILIAN ? 0 : (type == 3 ? 65 : 52));
     u->throw_acc  = (faction == FACTION_DUFFCOM) ? 56 :
                     (faction == FACTION_CIVILIAN ? 0 : (type == 3 ? 62 : 50));
     u->reactions  = (faction == FACTION_DUFFCOM) ? 46 :
-                    (faction == FACTION_CIVILIAN ? 15 : (type == 3 ? 55 : 42));
+                    (faction == FACTION_CIVILIAN ? 15 : (type == 5 ? 65 : (type == 3 ? 55 : 42)));
     isomap_init_unit_slots_from_summary(u);
     g_map[z][y][x].unit_idx = (int8_t)idx;
 
@@ -954,14 +1011,18 @@ int isomap_has_los(int x0, int y0, int z0, int x1, int y1, int z1) {
         }
 
         if (x != prev_x && y != prev_y) {
-            /* Diagonal step: prevent sight leaking diagonally between walls and curved UFO corner hull props */
+            /* Diagonal step: check both Path A (X then Y) and Path B (Y then X) plus sub-tile ray crossing */
+            int lhs = (2 * abs(prev_y - y0) + 1) * dx;
+            int rhs = (2 * abs(prev_x - x0) + 1) * dy;
             int path_a_blk = los_ortho_step_blocked(prev_x, prev_y, z, x, prev_y) ||
                              los_ortho_step_blocked(x, prev_y, z, x, y) ||
-                             isomap_is_ufo_corner_obj(g_map[z][prev_y][x].obj_id);
+                             is_los_blocking_prop(g_map[z][prev_y][x].obj_id);
             int path_b_blk = los_ortho_step_blocked(prev_x, prev_y, z, prev_x, y) ||
                              los_ortho_step_blocked(prev_x, y, z, x, y) ||
-                             isomap_is_ufo_corner_obj(g_map[z][y][prev_x].obj_id);
+                             is_los_blocking_prop(g_map[z][y][prev_x].obj_id);
             if (path_a_blk && path_b_blk) return 0;
+            if (lhs > rhs && path_a_blk)  return 0;
+            if (lhs < rhs && path_b_blk)  return 0;
         } else {
             if (x > prev_x) {
                 if (isomap_wall_blocks_los(g_map[z][y][x].wall_west)) return 0;
@@ -1113,15 +1174,21 @@ void isomap_update_path_preview(void) {
 
     pathfind_compute(u->x, u->y, u->z,
                      g_battle.cur_x, g_battle.cur_y, g_battle.view_level,
-                     u->unit_type == 2, &g_preview_path);
+                     (u->unit_type == 2 || u->is_drone > 0), &g_preview_path);
     apply_unit_weight_to_path(u, &g_preview_path);
 }
 
 void isomap_start_mission(int biome_id, int night_mode) {
-    static const int def_wep[5]  = { 1, 0, 2, 0, 1 };
-    static const int def_port[5] = { 0, 6, 1, 7, 2 };
+    static const int def_wep[8]  = { 1, 0, 2, 0, 1, 1, 0, 2 };
+    static const int def_port[8] = { 0, 6, 1, 7, 2, 8, 3, 9 };
     ProcSpawnPlan plan;
-    int i;
+    int i, next_uid;
+    int saved_ufo_class = g_battle.ufo_class;
+
+    if (g_camp.launched_event >= 0 && g_camp.launched_event < MAX_RADAR_EVENTS &&
+        g_camp.events[g_camp.launched_event].active) {
+        saved_ufo_class = g_camp.events[g_camp.launched_event].ufo_size;
+    }
 
     memset(&g_battle, 0, sizeof(g_battle));
     memset(g_units, 0, sizeof(g_units));
@@ -1130,11 +1197,16 @@ void isomap_start_mission(int biome_id, int night_mode) {
     invalidate_path_preview();
 
     g_battle.biome_id = biome_id % BIOME_COUNT;
+    g_battle.ufo_class = saved_ufo_class;
+    g_battle.map_w = (g_battle.biome_id != BIOME_BASE_DEFENSE && g_battle.ufo_class >= 2)
+                     ? MAX_MAP_W : NORM_MAP_W;
+    g_battle.map_h = g_battle.map_w;
     g_battle.view_level = 0;
     g_battle.roof_cutaway = 1;
     g_battle.night_mode = night_mode;
     g_battle.selected_unit = 0;
     g_battle.turn_number = 1;
+    g_battle.drone_unit_idx = -1;
     set_status(biome_titles[g_battle.biome_id]);
 
     /* Procedurally generate thematic layout, UFO crash/landing & verified spawn coordinates! */
@@ -1143,6 +1215,11 @@ void isomap_start_mission(int biome_id, int night_mode) {
     g_battle.bus_y0 = plan.bus_y0;
     g_battle.bus_x1 = plan.bus_x1;
     g_battle.bus_y1 = plan.bus_y1;
+    g_battle.bus_turret_tx       = plan.bus_turret_tx;
+    g_battle.bus_turret_ty       = plan.bus_turret_ty;
+    g_battle.bus_turret_dir      = plan.squad_dir;
+    g_battle.bus_drone_pad_x     = plan.bus_drone_pad_x;
+    g_battle.bus_drone_pad_y     = plan.bus_drone_pad_y;
     g_battle.bus_turret_level    = g_camp.arv_turret_level;
     g_battle.bus_turret_hp       = (g_camp.arv_turret_level == 2) ? 100 :
                                    (g_camp.arv_turret_level == 1 ? 60 : 0);
@@ -1153,18 +1230,61 @@ void isomap_start_mission(int biome_id, int night_mode) {
     g_battle.inv_modal_open      = 1;
 
 
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < MAX_SQUAD_SIZE; i++) {
         spawn_unit(i, 0, 0, default_squad_names[i],
                    plan.squad_x[i], plan.squad_y[i], 0,
                    plan.squad_dir, def_wep[i], def_port[i]);
+        if (i >= 5) {
+            /* Default 5-soldier squad unless campaign_sync_squad_units activates slots 5..7 */
+            g_map[0][plan.squad_y[i]][plan.squad_x[i]].unit_idx = -1;
+            g_units[i].active     = 0;
+            g_units[i].hp_max     = 0;
+            g_units[i].hp         = 0;
+            g_units[i].roster_idx = -1;
+            g_units[i].name[0]    = '\0';
+        }
     }
 
     isomap_load_roster();
 
-    for (i = 0; i < plan.num_aliens && (5 + i) < MAX_UNITS; i++) {
-        spawn_unit(5 + i, FACTION_ALIEN, plan.alien_type[i], plan.alien_name[i],
+    next_uid = MAX_SQUAD_SIZE;
+    for (i = 0; i < plan.num_aliens && next_uid < MAX_UNITS; i++) {
+        int uid = next_uid++;
+        int arank = plan.alien_rank[i];
+        Unit *au;
+        spawn_unit(uid, FACTION_ALIEN, plan.alien_type[i], plan.alien_name[i],
                    plan.alien_x[i], plan.alien_y[i], plan.alien_z[i],
                    plan.alien_dir[i], 2, 0);
+        au = &g_units[uid];
+        au->alien_rank = (uint8_t)arank;
+        if (au->unit_type == 1) {
+            /* Sectoids: lowest base HP, ranked up to Sectoid Commander (arank == 3) */
+            au->hp_max      = 30 + arank * 6;
+            au->tu_max      = 54 + arank * 4;
+            au->firing_acc  = 52 + arank * 6;
+            au->psi_skill   = (arank == 3) ? 85 : 0;
+            au->psi_trained = (arank == 3) ? 2 : 0;
+        } else if (au->unit_type == 2) {
+            /* Floaters: mid-game hovering troopers with more HP than Sectoids */
+            au->hp_max     = 52 + arank * 8;
+            au->tu_max     = 58 + arank * 4;
+            au->firing_acc = 58 + arank * 6;
+        } else if (au->unit_type == 3) {
+            /* Mutons: late-game armored tanks with very high HP */
+            au->hp_max     = 90 + arank * 12;
+            au->tu_max     = 62 + arank * 4;
+            au->firing_acc = 66 + arank * 5;
+        } else if (au->unit_type == 5) {
+            /* Cryptids: fast bio-weapons with high HP, long move range, and no ranged weapon */
+            au->hp_max     = 110;
+            au->tu_max     = 90;
+            au->weapon_id  = ITEM_NONE;
+            au->rhand_item = ITEM_NONE;
+            au->lhand_item = ITEM_NONE;
+            au->grenades   = 0;
+        }
+        au->hp = au->hp_max;
+        au->tu = au->tu_max;
     }
 
     g_battle.civilians_total          = plan.num_civilians;
@@ -1173,10 +1293,62 @@ void isomap_start_mission(int biome_id, int night_mode) {
     g_battle.civilians_killed_by_xcom = 0;
     g_battle.map_damage               = 0;
     g_battle.mission_score            = 0;
-    for (i = 0; i < plan.num_civilians && (5 + plan.num_aliens + i) < MAX_UNITS; i++) {
-        spawn_unit(5 + plan.num_aliens + i, FACTION_CIVILIAN, 4, plan.civ_name[i],
+    for (i = 0; i < plan.num_civilians && next_uid < MAX_UNITS; i++) {
+        int uid = next_uid++;
+        spawn_unit(uid, FACTION_CIVILIAN, 4, plan.civ_name[i],
                    plan.civ_x[i], plan.civ_y[i], plan.civ_z[i],
                    plan.civ_dir[i], ITEM_NONE, plan.civ_gender[i]);
+    }
+
+    /* Launch 1 Active Support Drone from the Front Roof Pad of the ARV if equipped/available! */
+    if (g_battle.biome_id != BIOME_BASE_DEFENSE && next_uid < MAX_UNITS) {
+        int drone_item = ITEM_NONE;
+        if (g_camp.arv_drone_item == ITEM_UFO_DRONE ||
+            g_camp.arv_cargo[ITEM_UFO_DRONE] > 0 || g_camp.stores[ITEM_UFO_DRONE] > 0) {
+            drone_item = ITEM_UFO_DRONE;
+        } else if (g_camp.arv_drone_item == ITEM_QUAD_DRONE ||
+                   g_camp.arv_cargo[ITEM_QUAD_DRONE] > 0 || g_camp.stores[ITEM_QUAD_DRONE] > 0) {
+            drone_item = ITEM_QUAD_DRONE;
+        }
+        if (drone_item != ITEM_NONE) {
+            int didx = next_uid++;
+            Unit *du = &g_units[didx];
+            int is_ufo_d = (drone_item == ITEM_UFO_DRONE);
+            memset(du, 0, sizeof(*du));
+            du->active                = 1;
+            du->faction               = FACTION_DUFFCOM;
+            du->orig_faction          = FACTION_DUFFCOM;
+            du->controlled_by_faction = FACTION_DUFFCOM;
+            du->roster_idx            = -1;
+            du->is_drone              = is_ufo_d ? 2 : 1;
+            du->unit_type             = 0;
+            du->sprite_id             = is_ufo_d ? UNIT_SPR_UFO_DRONE : UNIT_SPR_QUAD_DRONE;
+            du->portrait_id           = 0;
+            strncpy(du->name, is_ufo_d ? "UFO PLASMA DRONE" : "QUAD RIFLE DRONE", sizeof(du->name) - 1);
+            du->x = plan.bus_drone_pad_x;
+            du->y = plan.bus_drone_pad_y;
+            du->z = 1;
+            du->dir = plan.squad_dir;
+            du->tu_max = is_ufo_d ? 80 : 70;
+            du->tu     = du->tu_max;
+            du->hp_max = is_ufo_d ? 75 : 45;
+            du->hp     = du->hp_max;
+            du->energy_max = 100;
+            du->base_energy_max = 100;
+            du->energy = 100;
+            du->morale = 100;
+            du->bravery = 100;
+            du->firing_acc = is_ufo_d ? 74 : 62;
+            du->throw_acc  = 0;
+            du->reactions  = is_ufo_d ? 60 : 48;
+            du->weapon_id  = is_ufo_d ? ITEM_PLASMA_RIFLE : ITEM_ASSAULT_RIFLE;
+            du->sidearm_id = ITEM_NONE;
+            du->ammo       = 99;
+            du->extra_clips = 2;
+            isomap_init_unit_slots_from_summary(du);
+            g_map[1][du->y][du->x].unit_idx = (int8_t)didx;
+            g_battle.drone_unit_idx = (int8_t)didx;
+        }
     }
 
     g_battle.cur_x = g_units[0].x;
@@ -1539,7 +1711,7 @@ void isomap_move_or_interact(int tx, int ty) {
     }
 
     if (pathfind_compute(u->x, u->y, u->z, tx, ty, g_battle.view_level,
-                         u->unit_type == 2, &g_walk_path) && g_walk_path.length > 0) {
+                         (u->unit_type == 2 || u->is_drone > 0), &g_walk_path) && g_walk_path.length > 0) {
         apply_unit_weight_to_path(u, &g_walk_path);
         g_battle.walking_active = 1;
         g_battle.walk_step_idx = 0;
@@ -1551,6 +1723,180 @@ void isomap_move_or_interact(int tx, int ty) {
 }
 
 static void detonate_explosion(int cx, int cy, int cz, int attacker_idx);
+static void detonate_stun_explosion(int cx, int cy, int cz, int attacker_idx);
+
+/* Adjust living DUFF-COM operatives' Morale on squad casualty (0), civilian death (1), or alien kill (2) */
+static void apply_squad_morale_event(int kind) {
+    int i;
+    for (i = 0; i < MAX_UNITS; i++) {
+        Unit *op = &g_units[i];
+        int delta = 0;
+        if (!op->active || op->orig_faction != FACTION_DUFFCOM || op->is_drone ||
+            op->is_zombie || op->is_unconscious) {
+            continue;
+        }
+        if (kind == 0) {
+            /* Fellow operative KIA or Zombified */
+            delta = -(28 - (op->bravery / 6));
+            if (delta > -12) delta = -12;
+        } else if (kind == 1) {
+            /* Civilian killed */
+            delta = -(14 - (op->bravery / 10));
+            if (delta > -6) delta = -6;
+        } else {
+            /* Alien eliminated or captured */
+            delta = 8;
+        }
+        op->morale += delta;
+        if (op->morale < 0)   op->morale = 0;
+        if (op->morale > 100) op->morale = 100;
+    }
+}
+
+/* Knock an operative or alien unconscious (from Stun Rod, Stun Grenade, or grazing wounds)! */
+static void knock_unit_unconscious(int victim_idx, int attacker_idx) {
+    Unit *v;
+    char msg[48];
+    int visible, stage;
+
+    if (victim_idx < 0 || victim_idx >= MAX_UNITS || !g_units[victim_idx].active) return;
+    combat_anim_depth++;
+    v = &g_units[victim_idx];
+
+    v->pixel_off_x = 0;
+    v->pixel_off_y = 0;
+    if (v->hp < 2) v->hp = 2;
+
+    if (victim_idx == g_battle.selected_unit) {
+        g_battle.walking_active = 0;
+        g_battle.fire_mode = 0;
+        g_battle.weapon_menu_open = 0;
+    }
+
+    if (v->orig_faction == FACTION_ALIEN && !v->is_zombie) {
+        int cap_xp = operative_kill_xp(v->unit_type) + 15;
+        g_battle.aliens_captured++;
+        if (attacker_idx >= 0 && attacker_idx < MAX_UNITS &&
+            g_units[attacker_idx].orig_faction == FACTION_DUFFCOM) {
+            g_units[attacker_idx].xp_gained += cap_xp;
+        }
+        apply_squad_morale_event(2);
+        snprintf(msg, sizeof(msg), "%s STUNNED ALIVE! (+%d XP)", v->name, cap_xp);
+    } else if (v->orig_faction == FACTION_DUFFCOM) {
+        v->bleed_turns = (uint8_t)(3 + (rand() % 4)); /* Bleeds out in 3..6 turns unless Medkit used! */
+        v->faction               = FACTION_DUFFCOM;
+        v->controlled_by_faction = FACTION_DUFFCOM;
+        v->mind_control_turns    = 0;
+        snprintf(msg, sizeof(msg), "%s PASSED OUT! BLEEDING (%d TRN)!", v->name, (int)v->bleed_turns);
+    } else {
+        snprintf(msg, sizeof(msg), "%s KNOCKED UNCONSCIOUS!", v->name);
+    }
+    set_status(msg);
+    sfx_beep(300, 70);
+
+    visible = (v->orig_faction == 0 || g_map[v->z][v->y][v->x].fog == FOG_VISIBLE);
+    if (visible) {
+        int vsx, vsy;
+        g_battle.view_level = v->z;
+        isomap_tile_to_screen(v->x, v->y, v->z, &vsx, &vsy);
+        if (vsx < 8 || vsx > SCREEN_W - 40 || vsy < 16 || vsy > VIEWPORT_H - 20) {
+            isomap_center_camera_on(v->x, v->y, v->z);
+        }
+        for (stage = 1; stage <= 4; stage++) {
+            if (stage == 4) {
+                if (g_map[v->z][v->y][v->x].unit_idx == victim_idx) {
+                    g_map[v->z][v->y][v->x].unit_idx = -1;
+                }
+                while (v->z > 0 &&
+                       g_map[v->z][v->y][v->x].floor_id == FLOOR_NONE &&
+                       !isomap_is_lift_obj(g_map[v->z - 1][v->y][v->x].obj_id)) {
+                    v->z--;
+                }
+                g_battle.view_level = v->z;
+            }
+            v->death_anim = stage;
+            isomap_render();
+            hud_render();
+            vga_flip();
+            game_wait_frames(settings_death_step_frames());
+        }
+    }
+
+    if (g_map[v->z][v->y][v->x].unit_idx == victim_idx) {
+        g_map[v->z][v->y][v->x].unit_idx = -1;
+    }
+    while (v->z > 0 &&
+           g_map[v->z][v->y][v->x].floor_id == FLOOR_NONE &&
+           !isomap_is_lift_obj(g_map[v->z - 1][v->y][v->x].obj_id)) {
+        v->z--;
+    }
+
+    v->active         = 0;
+    v->death_anim     = 0;
+    v->is_corpse      = 1;
+    v->is_unconscious = 1;
+
+    /* Stunned aliens drop their held weapon onto the tile */
+    if (v->orig_faction == FACTION_ALIEN) {
+        if (item_is_weapon(v->weapon_id)) {
+            int a_id = item_get_def(v->weapon_id)->ammo_item_id;
+            isomap_drop_ground_item(v->x, v->y, v->z, v->weapon_id);
+            if (item_is_ammo(a_id) && (v->extra_clips > 0 || v->ammo > 0)) {
+                isomap_drop_ground_item(v->x, v->y, v->z, a_id);
+            }
+        }
+        /* If a Sectoid Commander is stunned, release any operatives it was mind-controlling! */
+        if (v->unit_type == 1 && v->alien_rank == 3) {
+            int k;
+            for (k = 0; k < MAX_UNITS; k++) {
+                if (g_units[k].active && g_units[k].orig_faction == FACTION_DUFFCOM && !g_units[k].is_zombie) {
+                    g_units[k].faction               = FACTION_DUFFCOM;
+                    g_units[k].controlled_by_faction = FACTION_DUFFCOM;
+                    g_units[k].mind_control_turns    = 0;
+                }
+            }
+        }
+    }
+
+    if (v->orig_faction == 0) {
+        isomap_recalc_lighting_and_fov();
+    }
+    if (victim_idx == g_battle.selected_unit) {
+        int k;
+        for (k = 1; k <= MAX_UNITS; k++) {
+            int nidx = (victim_idx + k) % MAX_UNITS;
+            if (g_units[nidx].active && g_units[nidx].faction == 0) {
+                g_battle.selected_unit = nidx;
+                g_battle.view_level = g_units[nidx].z;
+                g_battle.cur_x = g_units[nidx].x;
+                g_battle.cur_y = g_units[nidx].y;
+                invalidate_path_preview();
+                break;
+            }
+        }
+    }
+    combat_anim_depth--;
+}
+
+/* Decide whether a unit reduced to <= 0 HP passes out from wounds or dies outright */
+static void resolve_unit_lethal_or_passout(int victim_idx, int attacker_idx) {
+    Unit *v;
+    if (victim_idx < 0 || victim_idx >= MAX_UNITS || !g_units[victim_idx].active) return;
+    v = &g_units[victim_idx];
+    if (v->is_drone || v->is_zombie) {
+        kill_unit(victim_idx, attacker_idx);
+        return;
+    }
+    if (v->orig_faction == FACTION_DUFFCOM && v->hp >= -14 && (v->hp >= -6 || (rand() % 100) < 65)) {
+        knock_unit_unconscious(victim_idx, attacker_idx);
+        return;
+    }
+    if (v->orig_faction == FACTION_ALIEN && v->hp >= -8 && (rand() % 100) < 28) {
+        knock_unit_unconscious(victim_idx, attacker_idx);
+        return;
+    }
+    kill_unit(victim_idx, attacker_idx);
+}
 
 /* Play agonized death scream, 4-stage collapse animation, and leave persistent corpse in place! */
 static void kill_unit(int victim_idx, int killer_idx) {
@@ -1588,6 +1934,19 @@ static void kill_unit(int victim_idx, int killer_idx) {
         }
         if (v->faction == FACTION_ALIEN) {
             g_battle.aliens_killed++;
+            apply_squad_morale_event(2);
+            /* If a Sectoid Commander is eliminated, release any mind-controlled operatives! */
+            if (v->unit_type == 1 && v->alien_rank == 3) {
+                int mi;
+                for (mi = 0; mi < MAX_UNITS; mi++) {
+                    if (g_units[mi].active && g_units[mi].orig_faction == FACTION_DUFFCOM &&
+                        g_units[mi].controlled_by_faction == FACTION_ALIEN) {
+                        g_units[mi].controlled_by_faction = FACTION_DUFFCOM;
+                        g_units[mi].faction = FACTION_DUFFCOM;
+                        g_units[mi].mind_control_turns = 0;
+                    }
+                }
+            }
             if (kill_xp > 0) {
                 snprintf(msg, sizeof(msg), "%s ELIMINATED! (+%d XP)", v->name, kill_xp);
             } else {
@@ -1596,6 +1955,7 @@ static void kill_unit(int victim_idx, int killer_idx) {
         } else if (v->faction == FACTION_CIVILIAN) {
             g_battle.civilians_killed++;
             if (g_battle.civilians_saved > 0) g_battle.civilians_saved--;
+            apply_squad_morale_event(1);
             if (killer_idx >= 0 && killer_idx < MAX_UNITS &&
                 g_units[killer_idx].faction == FACTION_DUFFCOM) {
                 g_battle.civilians_killed_by_xcom++;
@@ -1604,7 +1964,19 @@ static void kill_unit(int victim_idx, int killer_idx) {
                 snprintf(msg, sizeof(msg), "CIVILIAN %s KILLED!", v->name);
             }
         } else {
-            snprintf(msg, sizeof(msg), "%s KIA!", v->name);
+            if (v->is_drone > 0) {
+                int did = (v->is_drone == 2) ? ITEM_UFO_DRONE : ITEM_QUAD_DRONE;
+                if (g_camp.arv_cargo[did] > 0) g_camp.arv_cargo[did]--;
+                else if (g_camp.stores[did] > 0) g_camp.stores[did]--;
+                if (g_camp.arv_cargo[did] <= 0 && g_camp.stores[did] <= 0 &&
+                    g_camp.arv_drone_item == did) {
+                    g_camp.arv_drone_item = ITEM_NONE;
+                }
+                snprintf(msg, sizeof(msg), "%s DESTROYED!", v->name);
+            } else {
+                apply_squad_morale_event(0);
+                snprintf(msg, sizeof(msg), "%s KIA!", v->name);
+            }
         }
     }
     set_status(msg);
@@ -1622,7 +1994,7 @@ static void kill_unit(int victim_idx, int killer_idx) {
         }
 
         for (stage = 1; stage <= 4; stage++) {
-            /* If a hovering Floater dies over open air, drop onto ground floor on final prone stage */
+            /* If a hovering Floater or Drone dies over open air, drop onto ground floor on final prone stage */
             if (stage == 4) {
                 if (g_map[v->z][v->y][v->x].unit_idx == victim_idx) {
                     g_map[v->z][v->y][v->x].unit_idx = -1;
@@ -1654,9 +2026,11 @@ static void kill_unit(int victim_idx, int killer_idx) {
         v->z--;
     }
 
-    v->active     = 0;
-    v->death_anim = 0;
-    v->is_corpse  = 1;
+    v->active         = 0;
+    v->death_anim     = 0;
+    v->is_unconscious = 0;
+    v->bleed_turns    = 0;
+    v->is_corpse      = 1;
     vx = v->x;
     vy = v->y;
     vz = v->z;
@@ -1664,7 +2038,11 @@ static void kill_unit(int victim_idx, int killer_idx) {
     /* Drop fallen unit's carried inventory onto the ground tile!
      * Any grenade primed for 0 turns explodes immediately on death;
      * any grenade primed for 1..6 turns drops onto the tile with its remaining fuse! */
-    if (v->faction == FACTION_DUFFCOM) {
+    if (v->is_drone > 0) {
+        v->rhand_item = ITEM_NONE;
+        v->lhand_item = ITEM_NONE;
+        v->weapon_id  = ITEM_NONE;
+    } else if (v->orig_faction == FACTION_DUFFCOM && !v->is_zombie) {
         int si;
         if (v->rhand_item >= 0) {
             int id = v->rhand_item;
@@ -1788,6 +2166,55 @@ static int smoke_step_unblocked(int x0, int y0, int z, int x1, int y1) {
     if (y1 > y0 && isomap_wall_blocks_los(g_map[z][y1][x0].wall_north)) return 0;
     if (y1 < y0 && isomap_wall_blocks_los(g_map[z][y0][x0].wall_north)) return 0;
     return 1;
+}
+
+/* Detonate a 3x3 Stun Gas Grenade at (cx, cy, cz) to knock targets unconscious! */
+static void detonate_stun_explosion(int cx, int cy, int cz, int attacker_idx) {
+    int sx, sy, r, dy, dx, k;
+    int stun_list[MAX_UNITS];
+    int num_stun = 0;
+    combat_anim_depth++;
+    isomap_tile_to_screen(cx, cy, cz, &sx, &sy);
+
+    sfx_explosion();
+    for (r = 4; r <= 24; r += 5) {
+        isomap_render();
+        hud_render();
+        vga_rect_fill(sx + 16 - r, sy + 8 - r / 2, r * 2, r, (r < 14) ? 144 : 80);
+        vga_flip();
+        game_wait_frames(settings_explode_step_frames());
+    }
+
+    for (dy = -1; dy <= 1; dy++) {
+        for (dx = -1; dx <= 1; dx++) {
+            int nx = cx + dx, ny = cy + dy;
+            MapCell *cell;
+            if ((unsigned)nx >= MAP_W || (unsigned)ny >= MAP_H) continue;
+            if ((dx != 0 || dy != 0) && !smoke_step_unblocked(cx, cy, cz, nx, ny)) continue;
+            cell = &g_map[cz][ny][nx];
+            if (cell->smoke < 2) cell->smoke = 2;
+            if (cell->unit_idx >= 0 && g_units[cell->unit_idx].active) {
+                int uid = cell->unit_idx;
+                Unit *tu = &g_units[uid];
+                if (!tu->is_drone && !tu->is_zombie) {
+                    int sdmg = 44 + (rand() % 28);
+                    tu->stun_dmg += sdmg;
+                    if (tu->stun_dmg >= tu->hp && num_stun < MAX_UNITS) {
+                        stun_list[num_stun++] = uid;
+                    }
+                }
+            }
+        }
+    }
+
+    isomap_recalc_lighting_and_fov();
+    invalidate_path_preview();
+    set_status("STUN GAS GRENADE DETONATED!");
+    for (k = 0; k < num_stun; k++) {
+        knock_unit_unconscious(stun_list[k], attacker_idx);
+    }
+    check_victory_state();
+    combat_anim_depth--;
 }
 
 /* Detonate a 3x3 High-Explosive blast at (cx, cy, cz) with Fire & Billowing Smoke! */
@@ -1946,7 +2373,7 @@ static void detonate_explosion(int cx, int cy, int cz, int attacker_idx) {
     invalidate_path_preview();
     set_status("HIGH-EXPLOSIVE DETONATION!");
     for (k = 0; k < num_dead; k++) {
-        kill_unit(dead_list[k], attacker_idx);
+        resolve_unit_lethal_or_passout(dead_list[k], attacker_idx);
     }
     check_victory_state();
     combat_anim_depth--;
@@ -2165,7 +2592,7 @@ static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int ac
     struct {
         int step_i;
         int z, wy, wx, is_north;
-    } glass_hits[MAP_W + MAP_H];
+    } glass_hits[MAX_MAP_W + MAX_MAP_H];
     int num_glass_hits = 0, g, prev_step, total_steps, rem_frames;
 
     combat_anim_depth++;
@@ -2229,48 +2656,58 @@ static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int ac
 
         direct_aim = (!aim_has_target && x == tx && y == ty && z == tz);
 
-        /* 1. Check West-wall boundary crossing (+x or -x) */
-        if (x != prev_x) {
-            int wx = (x > prev_x) ? x : prev_x;
-            int wy = (x > prev_x) ? y : prev_y;
-            int wres = trace_shot_wall_edge(wx, wy, z, 0, direct_aim, stray_shot);
-            if (wres == 2 && num_glass_hits < (MAP_W + MAP_H)) {
-                glass_hits[num_glass_hits].step_i   = i;
-                glass_hits[num_glass_hits].z        = z;
-                glass_hits[num_glass_hits].wy       = wy;
-                glass_hits[num_glass_hits].wx       = wx;
-                glass_hits[num_glass_hits].is_north = 0;
-                num_glass_hits++;
-            } else if (wres == 1) {
-                isomap_tile_to_screen(wx, wy, z, &px1, &py1);
-                hit_bx = px1 + 8;
-                hit_by = py1 - 6;
-                hit_wall_x = wx; hit_wall_y = wy; hit_wall_z = z; hit_wall_north = 0;
-                stop_kind = 2;
-                break;
+        /* 1 & 2. Check West-wall and North-wall boundary crossings in exact ray order (including both edges of diagonal steps!) */
+        {
+            int w_wx[2], w_wy[2], w_north[2], w_cnt = 0, wi;
+            int hit_solid_wall = 0;
+            if (x != prev_x && y == prev_y) {
+                w_wx[0] = (x > prev_x) ? x : prev_x;
+                w_wy[0] = prev_y;
+                w_north[0] = 0;
+                w_cnt = 1;
+            } else if (y != prev_y && x == prev_x) {
+                w_wx[0] = prev_x;
+                w_wy[0] = (y > prev_y) ? y : prev_y;
+                w_north[0] = 1;
+                w_cnt = 1;
+            } else if (x != prev_x && y != prev_y) {
+                int wx = (x > prev_x) ? x : prev_x;
+                int wy = (y > prev_y) ? y : prev_y;
+                int lhs = (2 * abs(prev_y - u->y) + 1) * dx;
+                int rhs = (2 * abs(prev_x - u->x) + 1) * dy;
+                if (lhs < rhs) {
+                    /* Crosses Y boundary first (prev_x, wy).wall_north, then X boundary (wx, y).wall_west */
+                    w_wx[0] = prev_x; w_wy[0] = wy; w_north[0] = 1;
+                    w_wx[1] = wx;     w_wy[1] = y;  w_north[1] = 0;
+                } else {
+                    /* Crosses X boundary first (wx, prev_y).wall_west, then Y boundary (x, wy).wall_north */
+                    w_wx[0] = wx; w_wy[0] = prev_y; w_north[0] = 0;
+                    w_wx[1] = x;  w_wy[1] = wy;     w_north[1] = 1;
+                }
+                w_cnt = 2;
             }
-        }
 
-        /* 2. Check North-wall boundary crossing (+y or -y) */
-        if (y != prev_y) {
-            int wx = (y > prev_y) ? x : prev_x;
-            int wy = (y > prev_y) ? y : prev_y;
-            int wres = trace_shot_wall_edge(wx, wy, z, 1, direct_aim, stray_shot);
-            if (wres == 2 && num_glass_hits < (MAP_W + MAP_H)) {
-                glass_hits[num_glass_hits].step_i   = i;
-                glass_hits[num_glass_hits].z        = z;
-                glass_hits[num_glass_hits].wy       = wy;
-                glass_hits[num_glass_hits].wx       = wx;
-                glass_hits[num_glass_hits].is_north = 1;
-                num_glass_hits++;
-            } else if (wres == 1) {
-                isomap_tile_to_screen(wx, wy, z, &px1, &py1);
-                hit_bx = px1 + 24;
-                hit_by = py1 - 6;
-                hit_wall_x = wx; hit_wall_y = wy; hit_wall_z = z; hit_wall_north = 1;
-                stop_kind = 2;
-                break;
+            for (wi = 0; wi < w_cnt; wi++) {
+                int wx = w_wx[wi], wy = w_wy[wi], is_n = w_north[wi];
+                int wres = trace_shot_wall_edge(wx, wy, z, is_n, direct_aim, stray_shot);
+                if (wres == 2 && num_glass_hits < (MAX_MAP_W + MAX_MAP_H)) {
+                    glass_hits[num_glass_hits].step_i   = i;
+                    glass_hits[num_glass_hits].z        = z;
+                    glass_hits[num_glass_hits].wy       = wy;
+                    glass_hits[num_glass_hits].wx       = wx;
+                    glass_hits[num_glass_hits].is_north = is_n;
+                    num_glass_hits++;
+                } else if (wres == 1) {
+                    isomap_tile_to_screen(wx, wy, z, &px1, &py1);
+                    hit_bx = px1 + (is_n ? 24 : 8);
+                    hit_by = py1 - 6;
+                    hit_wall_x = wx; hit_wall_y = wy; hit_wall_z = z; hit_wall_north = is_n;
+                    stop_kind = 2;
+                    hit_solid_wall = 1;
+                    break;
+                }
             }
+            if (hit_solid_wall) break;
         }
 
         cell = &g_map[z][y][x];
@@ -2421,7 +2858,7 @@ static void execute_raycast_shot(int shooter_idx, int tx, int ty, int tz, int ac
         sfx_hit();
         play_impact_splash(unit_splash, hit_bx, hit_by);
         if (target->hp <= 0) {
-            kill_unit(hit_unit_idx, shooter_idx);
+            resolve_unit_lethal_or_passout(hit_unit_idx, shooter_idx);
         }
     } else if (stop_kind == 4) {
         g_map[hit_z][hit_y][hit_x].obj_id = OBJ_RUBBLE;
@@ -2513,14 +2950,196 @@ void isomap_fire_weapon(int tx, int ty) {
     Unit *u = &g_units[g_battle.selected_unit];
 
     int mode = g_battle.fire_mode ? g_battle.fire_mode : 1;
-    int tu_cost = (mode == 1) ? 12 : (mode == 2) ? 20 : (mode == 3) ? 18 : (mode == 4) ? 15 : 8;
+    int tu_cost = (mode == 1) ? 12 : (mode == 2) ? 20 : (mode == 3) ? 18 :
+                  (mode == 4) ? 15 : (mode == 5) ? 8  : (mode == 6) ? 10 :
+                  (mode == 7) ? 10 : (mode == 8) ? 14 : (mode == 9) ? 20 : 12;
     int shots   = (mode == 3) ? 3 : 1;
     int s;
 
-    if (!u->active || u->faction != 0 || g_battle.walking_active) return;
+    if (!u->active || u->is_unconscious || u->faction != 0 || g_battle.walking_active) return;
     if (u->tu < tu_cost) {
-        set_status("NOT ENOUGH TUs TO ATTACK!");
+        set_status("NOT ENOUGH TUs TO ACT!");
         sfx_beep(200, 60);
+        return;
+    }
+
+    /* Mode 7: Field Medkit - Revive adjacent/self unconscious operative or heal wounds! */
+    if (mode == 7) {
+        int dist = abs(tx - u->x) + abs(ty - u->y);
+        int i, rev_idx = -1, heal_idx = -1;
+        char mmsg[64];
+        if (dist > 1 || g_battle.view_level != u->z) {
+            set_status("MEDKIT REQUIRES SELF OR ADJACENT TILE!");
+            sfx_beep(200, 60);
+            return;
+        }
+        /* Check for an unconscious DUFF-COM operative lying on (tx, ty, u->z) */
+        for (i = 0; i < MAX_UNITS; i++) {
+            if (!g_units[i].active && g_units[i].is_unconscious &&
+                g_units[i].orig_faction == FACTION_DUFFCOM && !g_units[i].is_zombie &&
+                g_units[i].x == tx && g_units[i].y == ty && g_units[i].z == u->z) {
+                rev_idx = i;
+                break;
+            }
+        }
+        if (rev_idx < 0 && g_map[u->z][ty][tx].unit_idx >= 0) {
+            int tid = g_map[u->z][ty][tx].unit_idx;
+            if (g_units[tid].active && g_units[tid].faction == FACTION_DUFFCOM && !g_units[tid].is_drone) {
+                heal_idx = tid;
+            }
+        }
+        if (rev_idx >= 0) {
+            Unit *rv = &g_units[rev_idx];
+            int heal_hp = 12 + (u->firing_acc / 5) + (rand() % 10);
+            if (g_map[u->z][ty][tx].unit_idx >= 0 && g_map[u->z][ty][tx].unit_idx != rev_idx) {
+                set_status("CLEAR TILE BEFORE REVIVING OPERATIVE!");
+                sfx_beep(200, 60);
+                return;
+            }
+            if (tx != u->x || ty != u->y) isomap_turn_unit_toward(u, tx, ty);
+            u->tu -= tu_cost;
+            g_battle.fire_mode = 0;
+            rv->active = 1;
+            rv->is_unconscious = 0;
+            rv->bleed_turns = 0;
+            rv->stun_dmg = 0;
+            rv->hp = (heal_hp > rv->hp_max) ? rv->hp_max : heal_hp;
+            rv->tu = rv->tu_max / 2;
+            g_map[u->z][ty][tx].unit_idx = (int8_t)rev_idx;
+            u->xp_gained += 15;
+            sfx_beep(660, 40);
+            sfx_beep(880, 60);
+            isomap_recalc_lighting_and_fov();
+            snprintf(mmsg, sizeof(mmsg), "MEDKIT REVIVED %s! (+%d HP)", rv->name, rv->hp);
+            set_status(mmsg);
+            return;
+        } else if (heal_idx >= 0) {
+            Unit *hv = &g_units[heal_idx];
+            int wound = hv->hp_max - hv->hp;
+            int heal_amt;
+            if (wound <= 0 && hv->stun_dmg <= 0) {
+                set_status("OPERATIVE IS ALREADY AT FULL HEALTH!");
+                sfx_beep(200, 60);
+                return;
+            }
+            if (tx != u->x || ty != u->y) isomap_turn_unit_toward(u, tx, ty);
+            u->tu -= tu_cost;
+            g_battle.fire_mode = 0;
+            /* Medkit healing depends on operative skill and wound severity */
+            heal_amt = 10 + (u->firing_acc / 4) + (rand() % 12) - (wound / 6);
+            if (heal_amt < 6) heal_amt = 6;
+            hv->hp += heal_amt;
+            if (hv->hp > hv->hp_max) hv->hp = hv->hp_max;
+            hv->stun_dmg -= 25;
+            if (hv->stun_dmg < 0) hv->stun_dmg = 0;
+            u->xp_gained += 10;
+            sfx_beep(660, 40);
+            sfx_beep(880, 60);
+            snprintf(mmsg, sizeof(mmsg), "MEDKIT HEALED %s (+%d HP)!", hv->name, heal_amt);
+            set_status(mmsg);
+            return;
+        } else {
+            set_status("SELECT WOUNDED OR UNCONSCIOUS OPERATIVE!");
+            sfx_beep(200, 60);
+            return;
+        }
+    }
+
+    /* Mode 8: Stun Rod - Melee electric shock to stun adjacent target alive! */
+    if (mode == 8) {
+        int dist = abs(tx - u->x) + abs(ty - u->y);
+        int tid;
+        if (dist != 1 || g_battle.view_level != u->z) {
+            set_status("STUN ROD REQUIRES ADJACENT TARGET!");
+            sfx_beep(200, 60);
+            return;
+        }
+        tid = g_map[u->z][ty][tx].unit_idx;
+        if (tid < 0 || !g_units[tid].active || tid == g_battle.selected_unit) {
+            set_status("NO TARGET ON ADJACENT TILE!");
+            sfx_beep(200, 60);
+            return;
+        }
+        isomap_turn_unit_toward(u, tx, ty);
+        u->tu -= tu_cost;
+        g_battle.fire_mode = 0;
+        {
+            Unit *tv = &g_units[tid];
+            int sx, sy;
+            int sdmg = 46 + (rand() % 28);
+            isomap_tile_to_screen(tx, ty, u->z, &sx, &sy);
+            sfx_beep(920, 35);
+            sfx_beep(540, 45);
+            play_impact_splash(SPLASH_LASER, sx + 16, sy - 2);
+            if (tv->is_zombie || tv->is_drone) {
+                tv->hp -= 20;
+                set_status("STUN ROD SHOCKED TARGET!");
+                if (tv->hp <= 0) kill_unit(tid, g_battle.selected_unit);
+            } else {
+                tv->stun_dmg += sdmg;
+                u->xp_gained += 15;
+                if (tv->stun_dmg >= tv->hp) {
+                    knock_unit_unconscious(tid, g_battle.selected_unit);
+                } else {
+                    char smsg[64];
+                    snprintf(smsg, sizeof(smsg), "STUN ROD HIT %s (%d/%d STUN)!",
+                             tv->name, tv->stun_dmg, tv->hp);
+                    set_status(smsg);
+                }
+            }
+        }
+        check_victory_state();
+        return;
+    }
+
+    /* Mode 9: Psionic Mind Probe - Mind-control target alien for 2 turns! */
+    if (mode == 9) {
+        int dist = abs(tx - u->x) + abs(ty - u->y);
+        int tid;
+        if (u->psi_trained < 2 || u->psi_skill <= 0) {
+            set_status("OPERATIVE REQUIRES PSI-LAB TRAINING!");
+            sfx_beep(200, 60);
+            return;
+        }
+        if (dist > 14) {
+            set_status("TARGET OUT OF PSIONIC PROBE RANGE!");
+            sfx_beep(200, 60);
+            return;
+        }
+        tid = g_map[g_battle.view_level][ty][tx].unit_idx;
+        if (tid < 0 || !g_units[tid].active || g_units[tid].faction != FACTION_ALIEN) {
+            set_status("SELECT VISIBLE HOSTILE ALIEN TO MIND-CONTROL!");
+            sfx_beep(200, 60);
+            return;
+        }
+        isomap_turn_unit_toward(u, tx, ty);
+        u->tu -= tu_cost;
+        g_battle.fire_mode = 0;
+        {
+            Unit *tv = &g_units[tid];
+            int sx, sy;
+            int resist = tv->alien_rank * 15 + (tv->unit_type == 5 ? 25 : 0);
+            int chance = 42 + (u->psi_skill * 2) / 3 - resist;
+            if (chance < 15) chance = 15;
+            if (chance > 92) chance = 92;
+            isomap_tile_to_screen(tx, ty, g_battle.view_level, &sx, &sy);
+            sfx_beep(740, 50);
+            sfx_beep(980, 60);
+            play_impact_splash(SPLASH_PLASMA, sx + 16, sy - 2);
+            if ((rand() % 100) < chance) {
+                char pmsg[64];
+                tv->controlled_by_faction = FACTION_DUFFCOM;
+                tv->faction = FACTION_DUFFCOM;
+                tv->mind_control_turns = 2;
+                tv->tu = tv->tu_max;
+                u->xp_gained += 25;
+                isomap_recalc_lighting_and_fov();
+                snprintf(pmsg, sizeof(pmsg), "PSIONIC LINK! %s MIND-CONTROLLED (2 TURNS)!", tv->name);
+                set_status(pmsg);
+            } else {
+                set_status("MIND PROBE RESISTED BY ALIEN WILLPOWER!");
+            }
+        }
         return;
     }
 
@@ -2657,7 +3276,7 @@ void isomap_fire_weapon(int tx, int ty) {
         return;
     }
 
-    /* Mode 4: Throw Primed High-Explosive Grenade from Right or Left Hand! */
+    /* Mode 4: Throw Primed Grenade (Frag or Stun) from Right or Left Hand! */
     if (mode == 4) {
         int sx0, sy0, sx1, sy1, step;
         int roll = rand() % 100;
@@ -2746,7 +3365,11 @@ void isomap_fire_weapon(int tx, int ty) {
         }
         if (prime_turns <= 0) {
             /* Primed at 0 turns: explodes immediately upon landing! */
-            detonate_explosion(land_x, land_y, g_battle.view_level, g_battle.selected_unit);
+            if (thrown_gren_id == ITEM_STUN_GRENADE) {
+                detonate_stun_explosion(land_x, land_y, g_battle.view_level, g_battle.selected_unit);
+            } else {
+                detonate_explosion(land_x, land_y, g_battle.view_level, g_battle.selected_unit);
+            }
         } else {
             /* Primed at 1..6 turns: lands on ground and counts down each turn! */
             char fmsg[48];
@@ -2779,12 +3402,20 @@ void isomap_fire_weapon(int tx, int ty) {
     }
 
     if (u->ammo <= 0) {
-        int ammo_id = item_get_def(u->weapon_id)->ammo_item_id;
+        const ItemDef *wdef = item_get_def(u->weapon_id);
+        int ammo_id = wdef->ammo_item_id;
+        int rtu = (wdef->reload_tu > 0) ? wdef->reload_tu : 3;
         if (u->extra_clips > 0) {
+            if (u->tu < tu_cost + rtu) {
+                set_status("NOT ENOUGH TUs TO RELOAD AND FIRE!");
+                sfx_beep(200, 60);
+                return;
+            }
             if (!isomap_consume_unit_item(u, ammo_id)) {
                 u->extra_clips--;
             }
-            u->ammo = item_get_def(u->weapon_id)->clip_size;
+            u->tu -= rtu;
+            u->ammo = wdef->clip_size;
             if (u->active_hand == 1 && u->lhand_item == u->weapon_id) u->lhand_ammo = u->ammo;
             else if (u->rhand_item == u->weapon_id)                   u->rhand_ammo = u->ammo;
             else if (u->lhand_item == u->weapon_id)                   u->lhand_ammo = u->ammo;
@@ -2803,13 +3434,16 @@ void isomap_fire_weapon(int tx, int ty) {
     for (s = 0; s < shots && u->active; s++) {
         int dist = abs(tx - u->x) + abs(ty - u->y);
         int acc;
-        int ammo_id = item_get_def(u->weapon_id)->ammo_item_id;
+        const ItemDef *wdef = item_get_def(u->weapon_id);
+        int ammo_id = wdef->ammo_item_id;
+        int rtu = (wdef->reload_tu > 0) ? wdef->reload_tu : 3;
         if (u->ammo <= 0) {
-            if (u->extra_clips > 0) {
+            if (u->extra_clips > 0 && u->tu >= rtu) {
                 if (!isomap_consume_unit_item(u, ammo_id)) {
                     u->extra_clips--;
                 }
-                u->ammo = item_get_def(u->weapon_id)->clip_size;
+                u->tu -= rtu;
+                u->ammo = wdef->clip_size;
                 if (u->active_hand == 1 && u->lhand_item == u->weapon_id) u->lhand_ammo = u->ammo;
                 else if (u->rhand_item == u->weapon_id)                   u->rhand_ammo = u->ammo;
                 else if (u->lhand_item == u->weapon_id)                   u->lhand_ammo = u->ammo;
@@ -2826,11 +3460,12 @@ void isomap_fire_weapon(int tx, int ty) {
         acc = isomap_calc_shot_acc(u, mode, dist);
         execute_raycast_shot(g_battle.selected_unit, tx, ty, g_battle.view_level, acc);
 
-        if (u->ammo == 0 && u->extra_clips > 0) {
+        if (u->ammo == 0 && u->extra_clips > 0 && u->tu >= rtu) {
             if (!isomap_consume_unit_item(u, ammo_id)) {
                 u->extra_clips--;
             }
-            u->ammo = item_get_def(u->weapon_id)->clip_size;
+            u->tu -= rtu;
+            u->ammo = wdef->clip_size;
             if (u->rhand_item == u->weapon_id)      u->rhand_ammo = u->ammo;
             else if (u->lhand_item == u->weapon_id) u->lhand_ammo = u->ammo;
             set_status("AUTO-RELOADED MAGAZINE!");
@@ -2901,7 +3536,12 @@ static void show_hidden_movement_screen(void) {
 void isomap_draw_turn_splash(void) {
     char buf[48];
     const char *btitle = biome_titles[g_battle.biome_id % BIOME_COUNT];
-    int k, alive_cnt = 0;
+    int k, alive_cnt = 0, deployed_cnt = 0, slot_i = 0;
+
+    for (k = 0; k < MAX_SQUAD_SIZE; k++) {
+        if (g_units[k].hp_max > 0 && g_units[k].name[0] != '\0') deployed_cnt++;
+    }
+    if (deployed_cnt < 1) deployed_cnt = 1;
 
     vga_clear(COL_BLACK);
 
@@ -2921,56 +3561,87 @@ void isomap_draw_turn_splash(void) {
 
     for (k = 0; k < MAX_SQUAD_SIZE; k++) {
         const Unit *u = &g_units[k];
-        int cx = 30 + k * 53;
-        int alive = (u->active && !u->is_corpse && u->hp > 0);
+        int compact = (deployed_cnt > 5);
+        int card_w  = compact ? 32 : 48;
+        int step_x  = compact ? 33 : 53;
+        int total_w = deployed_cnt * step_x - (step_x - card_w);
+        int start_x = (SCREEN_W - total_w) / 2;
+        int cx;
+        int alive = (u->active && !u->is_corpse && u->hp > 0 && u->faction == FACTION_DUFFCOM);
+        int unc   = (!u->active && u->is_unconscious && u->orig_faction == FACTION_DUFFCOM && !u->is_zombie);
         int is_sel = (alive && k == g_battle.selected_unit);
         const char *raw_call = operative_strip_rank_prefix(u->name);
-        char call_buf[8];
+        char call_buf[10];
+
+        if (u->hp_max <= 0 || u->name[0] == '\0') continue;
+        cx = start_x + slot_i * step_x;
+        slot_i++;
 
         if (alive) alive_cnt++;
 
-        vga_rect_bevel(cx, 67, 48, 79,
-                       alive ? 75 : 13,
-                       is_sel ? 96 : (alive ? 66 : 11),
+        vga_rect_bevel(cx, 67, card_w, 79,
+                       alive ? 75 : (unc ? 46 : 13),
+                       is_sel ? 96 : (alive ? 66 : (unc ? 113 : 11)),
                        15);
 
-        /* Portrait frame (36x40) + 32x36 Operative Portrait */
-        vga_rect_bevel(cx + 6, 70, 36, 40, 15, alive ? 163 : 12, 14);
-        if (alive) {
-            vga_blit_ui(cx + 8, 72, 32, 36, spr_portraits[u->portrait_id % NUM_PORTRAITS]);
-            operative_draw_rank_badge(cx + 9, 73, u->rank);
+        if (!compact) {
+            /* Portrait frame (36x40) + 32x36 Operative Portrait */
+            vga_rect_bevel(cx + 6, 70, 36, 40, 15, alive ? 163 : 12, 14);
+            if (alive) {
+                vga_blit_ui(cx + 8, 72, 32, 36, spr_portraits[u->portrait_id % NUM_PORTRAITS]);
+                operative_draw_rank_badge(cx + 9, 73, u->rank);
+            } else {
+                vga_blit_shaded(cx + 8, 72, 32, 36,
+                                spr_portraits[u->portrait_id % NUM_PORTRAITS], 10, SCREEN_H);
+                vga_rect_fill(cx + 8, 97, 32, 11, 45);
+                vga_print_shadow(cx + 12, 99, unc ? "OUT" : "KIA", 33, 15);
+            }
         } else {
-            vga_blit_shaded(cx + 8, 72, 32, 36,
-                            spr_portraits[u->portrait_id % NUM_PORTRAITS], 10, SCREEN_H);
-            vga_rect_fill(cx + 8, 97, 32, 11, 45);
-            vga_print_shadow(cx + 15, 99, "KIA", 33, 15);
+            /* Compact 32px card for 6..8 operatives */
+            if (alive) {
+                vga_blit_ui(cx, 70, 32, 36, spr_portraits[u->portrait_id % NUM_PORTRAITS]);
+                operative_draw_rank_badge(cx + 1, 71, u->rank);
+            } else {
+                vga_blit_shaded(cx, 70, 32, 36,
+                                spr_portraits[u->portrait_id % NUM_PORTRAITS], 10, SCREEN_H);
+                vga_rect_fill(cx + 2, 95, 28, 11, 45);
+                vga_print_shadow(cx + 7, 97, unc ? "OUT" : "KIA", 33, 15);
+            }
         }
 
-        /* Compact Operative Callsign */
+        /* Operative Callsign (uses compact 3x5 font if > 7 chars or in compact card mode) */
         strncpy(call_buf, raw_call, 7);
         call_buf[7] = '\0';
-        vga_print_shadow(cx + (48 - vga_text_width(call_buf)) / 2, 113,
-                         call_buf, alive ? (is_sel ? 96 : 0) : 9, 15);
+        if (compact) {
+            vga_print_sm_shadow(cx + (card_w - vga_text_width_sm(call_buf)) / 2, 113,
+                                call_buf, alive ? (is_sel ? 96 : 0) : 9, 15);
+        } else {
+            vga_print_shadow(cx + (card_w - vga_text_width(call_buf)) / 2, 113,
+                             call_buf, alive ? (is_sel ? 96 : 0) : 9, 15);
+        }
 
         /* HP & TU Readiness Bars */
         if (alive) {
-            int hp_w = (u->hp_max > 0) ? ((u->hp * 38) / u->hp_max) : 0;
-            int tu_w = (u->tu_max > 0) ? ((u->tu * 38) / u->tu_max) : 0;
-            if (hp_w < 1)  hp_w = 1;
-            if (hp_w > 38) hp_w = 38;
-            if (tu_w < 0)  tu_w = 0;
-            if (tu_w > 38) tu_w = 38;
+            int max_bar = card_w - 10;
+            int hp_w = (u->hp_max > 0) ? ((u->hp * max_bar) / u->hp_max) : 0;
+            int tu_w = (u->tu_max > 0) ? ((u->tu * max_bar) / u->tu_max) : 0;
+            if (hp_w < 1)       hp_w = 1;
+            if (hp_w > max_bar) hp_w = max_bar;
+            if (tu_w < 0)       tu_w = 0;
+            if (tu_w > max_bar) tu_w = max_bar;
 
-            vga_rect_bevel(cx + 4, 123, 40, 5, 13, 10, 15);
+            vga_rect_bevel(cx + 4, 123, max_bar + 2, 5, 13, 10, 15);
             vga_rect_fill(cx + 5, 124, hp_w, 3, 33);
 
-            vga_rect_bevel(cx + 4, 130, 40, 5, 13, 10, 15);
+            vga_rect_bevel(cx + 4, 130, max_bar + 2, 5, 13, 10, 15);
             if (tu_w > 0) {
                 vga_rect_fill(cx + 5, 131, tu_w, 3, 18);
             }
-            vga_print(cx + 9, 137, "READY", 80);
+            vga_print_sm(cx + (card_w - (compact ? 8 : 20)) / 2, 138, compact ? "OK" : "READY", 80);
+        } else if (unc) {
+            vga_print_sm(cx + (card_w - 20) / 2, 130, "BLEED", 33);
         } else {
-            vga_print(cx + 6, 129, "FALLEN", 36);
+            vga_print_sm(cx + (card_w - (compact ? 12 : 24)) / 2, 130, compact ? "KIA" : "FALLEN", 36);
         }
     }
 
@@ -2978,7 +3649,7 @@ void isomap_draw_turn_splash(void) {
     vga_rect_bevel(24, 156, 272, 30, 14, 66, 79);
     vga_print_shadow((SCREEN_W - vga_text_width(btitle)) / 2, 161, btitle, 96, 15);
     snprintf(buf, sizeof(buf), "%d OF %d OPERATIVES READY FOR ORDERS",
-             alive_cnt, MAX_SQUAD_SIZE);
+             alive_cnt, deployed_cnt);
     vga_print((SCREEN_W - vga_text_width(buf)) / 2, 173, buf, 1);
 }
 
@@ -3006,6 +3677,74 @@ static void show_operatives_turn_splash(void) {
         }
     }
     input_flush();
+}
+
+/* Transform an infected operative or civilian at (victim_idx) into a hostile Zombie! */
+static void infect_unit_into_zombie(int victim_idx) {
+    Unit *v = &g_units[victim_idx];
+    char zmsg[64];
+    int vx = v->x, vy = v->y, vz = v->z;
+
+    if (v->orig_faction == FACTION_DUFFCOM && !v->is_drone) {
+        int si;
+        if (v->rhand_item >= 0) {
+            isomap_drop_ground_item_primed(vx, vy, vz, v->rhand_item, v->slot_prime[0]);
+            v->rhand_item = ITEM_NONE; v->rhand_ammo = 0; v->slot_prime[0] = -1;
+        }
+        if (v->lhand_item >= 0) {
+            isomap_drop_ground_item_primed(vx, vy, vz, v->lhand_item, v->slot_prime[1]);
+            v->lhand_item = ITEM_NONE; v->lhand_ammo = 0; v->slot_prime[1] = -1;
+        }
+        for (si = 0; si < INV_BELT_SMALL; si++) {
+            if (v->belt_small[si] >= 0) {
+                isomap_drop_ground_item_primed(vx, vy, vz, v->belt_small[si], v->slot_prime[2 + si]);
+                v->belt_small[si] = ITEM_NONE; v->slot_prime[2 + si] = -1;
+            }
+        }
+        for (si = 0; si < INV_BELT_LARGE; si++) {
+            if (v->belt_large[si] >= 0) {
+                isomap_drop_ground_item_primed(vx, vy, vz, v->belt_large[si], v->slot_prime[6 + si]);
+                v->belt_large[si] = ITEM_NONE; v->slot_prime[6 + si] = -1;
+            }
+        }
+        for (si = 0; si < INV_BACKPACK_SZ; si++) {
+            if (v->backpack[si] >= 0) {
+                isomap_drop_ground_item_primed(vx, vy, vz, v->backpack[si], v->slot_prime[8 + si]);
+                v->backpack[si] = ITEM_NONE; v->slot_prime[8 + si] = -1;
+            }
+        }
+        isomap_sync_unit_inventory(v);
+        apply_squad_morale_event(0);
+    } else if (v->faction == FACTION_CIVILIAN) {
+        g_battle.civilians_killed++;
+        if (g_battle.civilians_saved > 0) g_battle.civilians_saved--;
+        apply_squad_morale_event(1);
+    }
+
+    v->active                = 1;
+    v->is_corpse             = 0;
+    v->is_unconscious        = 0;
+    v->bleed_turns           = 0;
+    v->stun_dmg              = 0;
+    v->is_zombie             = 1;
+    v->unit_type             = 6;
+    v->sprite_id             = UNIT_SPR_ZOMBIE;
+    v->faction               = FACTION_ALIEN;
+    v->controlled_by_faction = FACTION_ALIEN;
+    v->hp_max                = 68;
+    v->hp                    = 68;
+    v->tu_max                = 52;
+    v->tu                    = 24;
+    v->weapon_id             = ITEM_NONE;
+    v->ammo                  = 0;
+    v->extra_clips           = 0;
+    g_map[vz][vy][vx].unit_idx = (int8_t)victim_idx;
+
+    sound_play_death(FACTION_ALIEN, 3, 0);
+    snprintf(zmsg, sizeof(zmsg), "BIO-INFECTION! %s TURNED INTO A ZOMBIE!", v->name);
+    strncpy(v->name, "ZOMBIE", sizeof(v->name) - 1);
+    set_status(zmsg);
+    isomap_recalc_lighting_and_fov();
 }
 
 void isomap_end_turn(void) {
@@ -3256,22 +3995,25 @@ void isomap_end_turn(void) {
         }
     }
 
-    /* 2. Tactical Alien AI: Guard/Patrol until alerted, then hunt & fire Plasma if in LOS */
+    /* 2. Tactical Alien AI: Guard/Patrol until alerted, then hunt, use Psionics, Melee Bio-Claw, or fire Plasma! */
     for (i = 0; i < MAX_UNITS && g_battle.mission_ended == 0; i++) {
         Unit *a = &g_units[i];
         int best_s = -1, best_dist = 999;
         int best_los_s = -1, best_los_dist = 999;
         int ally_spotted = 0;
         int alerted = 0;
+        int is_melee_unit = (a->unit_type == 5 || a->is_zombie);
+        int is_sectoid_cmdr = (a->unit_type == 1 && a->alien_rank == 3);
         int s, step;
         int ended_with_shot = 0;
 
         if (!a->active || a->faction != 1) continue;
         a->tu = a->tu_max;
 
-        /* Scan active DUFF-COM operatives for proximity & Line-of-Sight */
+        /* Scan active DUFF-COM operatives (and Civilians for Cryptids/Zombies) for proximity & Line-of-Sight */
         for (s = 0; s < MAX_UNITS; s++) {
-            if (g_units[s].active && g_units[s].faction == 0) {
+            if (g_units[s].active &&
+                (g_units[s].faction == 0 || (is_melee_unit && g_units[s].faction == FACTION_CIVILIAN))) {
                 Unit *op = &g_units[s];
                 int d = abs(op->x - a->x) + abs(op->y - a->y);
                 int max_ai_sight = (g_battle.night_mode && g_map[op->z][op->y][op->x].light > 6) ? 11 : 19;
@@ -3300,20 +4042,75 @@ void isomap_end_turn(void) {
             }
         }
 
-        alerted = (g_map[a->z][a->y][a->x].fog == FOG_VISIBLE) ||
+        alerted = is_melee_unit ||
+                  (g_map[a->z][a->y][a->x].fog == FOG_VISIBLE) ||
                   (best_los_s >= 0) ||
                   (best_dist <= 12) ||
                   ally_spotted ||
                   (g_battle.turn_number >= 14 && (((i + g_battle.turn_number) & 1) == 0));
 
-        /* Compute 3D A* path: hunt operative when alerted, or lurk/patrol locally when unalerted! */
+        /* Sectoid Commander Psionic Mind Control Attack (camps in UFO & puppets operatives for 2 turns!) */
+        if (is_sectoid_cmdr && a->tu >= 20 && (alerted || ally_spotted || g_battle.turn_number >= 2)) {
+            int psi_target = -1, psi_best_d = 999;
+            for (s = 0; s < MAX_UNITS; s++) {
+                Unit *op = &g_units[s];
+                if (op->active && op->faction == FACTION_DUFFCOM && !op->is_drone && !op->is_zombie &&
+                    op->controlled_by_faction == FACTION_DUFFCOM) {
+                    int d = abs(op->x - a->x) + abs(op->y - a->y);
+                    if (d <= 22 && d < psi_best_d) {
+                        psi_best_d = d;
+                        psi_target = s;
+                    }
+                }
+            }
+            if (psi_target >= 0 && (rand() % 100) < 65) {
+                Unit *op = &g_units[psi_target];
+                int tsx, tsy;
+                int chance = 55 - (op->bravery / 3) - (op->psi_skill / 4);
+                if (chance < 20) chance = 20;
+                if (chance > 80) chance = 80;
+                a->tu -= 20;
+                if (hidden_screen_up) {
+                    hidden_screen_up = 0;
+                    need_hidden_pause = 0;
+                }
+                any_alien_seen = 1;
+                ended_with_shot = 1;
+                g_battle.view_level = op->z;
+                isomap_center_camera_on(op->x, op->y, op->z);
+                isomap_tile_to_screen(op->x, op->y, op->z, &tsx, &tsy);
+                sfx_beep(880, 45);
+                sfx_beep(440, 65);
+                play_impact_splash(SPLASH_PLASMA, tsx + 16, tsy - 4);
+                if ((rand() % 100) < chance) {
+                    char pmsg[64];
+                    op->controlled_by_faction = FACTION_ALIEN;
+                    op->faction               = FACTION_ALIEN;
+                    op->mind_control_turns    = 2;
+                    apply_squad_morale_event(0);
+                    snprintf(pmsg, sizeof(pmsg), "SECTOID CMDR MIND-CONTROLLED %s!", op->name);
+                    set_status(pmsg);
+                    check_victory_state();
+                } else {
+                    char pmsg[64];
+                    snprintf(pmsg, sizeof(pmsg), "%s RESISTED SECTOID PSIONIC ATTACK!", op->name);
+                    set_status(pmsg);
+                }
+                game_wait_frames(settings_alien_post_shot_frames());
+            }
+        }
+
+        /* Compute 3D A* path: hunt operative when alerted, or lurk/patrol locally when unalerted!
+         * Sectoid Commanders camp inside the UFO unless the UFO core has been damaged! */
         {
             PathResult ai_path;
             int has_path = 0;
             int max_steps = 0;
             int path_limit = 0;
+            int cmdr_camps_in_ufo = (is_sectoid_cmdr && g_battle.ufo_core_hits == 0 &&
+                                     g_map[a->z][a->y][a->x].floor_id == FLOOR_UFO_DECK);
 
-            if (alerted) {
+            if (alerted && !cmdr_camps_in_ufo) {
                 int goal_s = (best_los_s >= 0) ? best_los_s : best_s;
                 Unit *target = &g_units[goal_s];
                 g_map[target->z][target->y][target->x].unit_idx = -1;
@@ -3321,12 +4118,12 @@ void isomap_end_turn(void) {
                                             target->x, target->y, target->z,
                                             a->unit_type == 2, &ai_path);
                 g_map[target->z][target->y][target->x].unit_idx = (int8_t)goal_s;
-                max_steps = 3;
+                max_steps = (a->unit_type == 5) ? 8 : (a->is_zombie ? 4 : 3);
                 path_limit = ai_path.length - 1;
             } else {
                 int rad = 0, roll = rand() % 100;
-                if (i == 5) {               /* UFO Commander: guards UFO interior */
-                    if (roll < 45) { rad = 2; max_steps = 1; }
+                if (cmdr_camps_in_ufo || i == 5) { /* UFO Commander: camps inside UFO interior */
+                    if (roll < 35) { rad = 2; max_steps = 1; }
                 } else if (i == 6) {        /* Rooftop / Hayloft Sniper: shifts overwatch */
                     if (roll < 50) { rad = 4; max_steps = 2; }
                 } else if (i <= 8) {        /* Interior Building / Cornfield Lurkers */
@@ -3344,6 +4141,7 @@ void isomap_end_turn(void) {
                         if (wx < 1 || wx >= MAP_W - 1 || wy < 1 || wy >= MAP_H - 1) continue;
                         if (wx == a->x && wy == a->y) continue;
                         if (g_map[wz][wy][wx].floor_id == FLOOR_NONE) continue;
+                        if (cmdr_camps_in_ufo && g_map[wz][wy][wx].floor_id != FLOOR_UFO_DECK) continue;
                         if (g_map[wz][wy][wx].unit_idx != -1) continue;
                         if (g_map[wz][wy][wx].obj_id != OBJ_NONE &&
                             g_map[wz][wy][wx].obj_id != OBJ_RUBBLE) continue;
@@ -3360,28 +4158,40 @@ void isomap_end_turn(void) {
             }
 
             for (step = 0; has_path && step < max_steps && step < path_limit &&
-                           a->active && a->tu >= 18 && g_battle.mission_ended == 0; step++) {
+                           a->active && a->tu >= (is_melee_unit ? 12 : 18) && g_battle.mission_ended == 0; step++) {
                 PathStep *st = &ai_path.steps[step];
                 int prev_ax = a->x, prev_ay = a->y, prev_az = a->z;
                 int was_vis = (g_map[prev_az][prev_ay][prev_ax].fog == FOG_VISIBLE);
                 int now_vis, door_opened, hold_fire_pos = 0;
 
-                for (s = 0; s < MAX_UNITS; s++) {
-                    if (g_units[s].active && g_units[s].faction == 0) {
-                        int d_op = abs(g_units[s].x - a->x) + abs(g_units[s].y - a->y);
-                        if (d_op <= 9 && isomap_has_los(a->x, a->y, a->z,
-                                                        g_units[s].x, g_units[s].y, g_units[s].z)) {
-                            hold_fire_pos = 1;
-                            break;
+                if (!is_melee_unit) {
+                    for (s = 0; s < MAX_UNITS; s++) {
+                        if (g_units[s].active && g_units[s].faction == 0) {
+                            int d_op = abs(g_units[s].x - a->x) + abs(g_units[s].y - a->y);
+                            if (d_op <= 9 && isomap_has_los(a->x, a->y, a->z,
+                                                            g_units[s].x, g_units[s].y, g_units[s].z)) {
+                                hold_fire_pos = 1;
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    for (s = 0; s < MAX_UNITS; s++) {
+                        if (g_units[s].active && (g_units[s].faction == 0 || g_units[s].faction == FACTION_CIVILIAN)) {
+                            if (g_units[s].z == a->z &&
+                                abs(g_units[s].x - a->x) + abs(g_units[s].y - a->y) <= 1) {
+                                hold_fire_pos = 1;
+                                break;
+                            }
                         }
                     }
                 }
 
                 /* Smart Alien AI vs ARV Roof Turret: aliens avoid suicidally rushing the bus
                  * and become more cautious as fewer aliens remain (with a small random blunder chance!) */
-                if (g_battle.bus_turret_level > 0 && g_battle.bus_turret_hp > 0) {
-                    int bus_cx = (g_battle.bus_x0 + g_battle.bus_x1) / 2;
-                    int bus_cy = (g_battle.bus_y0 + g_battle.bus_y1) / 2;
+                if (!is_melee_unit && g_battle.bus_turret_level > 0 && g_battle.bus_turret_hp > 0) {
+                    int bus_cx = g_battle.bus_turret_tx;
+                    int bus_cy = g_battle.bus_turret_ty;
                     int t_rng  = (g_battle.bus_turret_level == 2) ? 11 : 8;
                     int d_next = abs(st->x - bus_cx) + abs(st->y - bus_cy);
                     int d_cur  = abs(a->x  - bus_cx) + abs(a->y  - bus_cy);
@@ -3396,7 +4206,7 @@ void isomap_end_turn(void) {
                         }
                     }
                 }
-                if (hold_fire_pos) break; /* Optimal firing position reached! */
+                if (hold_fire_pos) break; /* Optimal firing/melee position reached! */
 
                 if (g_map[st->z][st->y][st->x].unit_idx != -1) break;
 
@@ -3517,33 +4327,37 @@ void isomap_end_turn(void) {
                     ended_with_shot = 1;
                 }
 
-                /* ARV Roof Defensive Turret Fire: activates if alien enters range & cooldown is 0! */
+                /* ARV Roof Defensive Turret Fire: rotates to face alien & fires if alien enters range & cooldown is 0! */
                 if (a->active && g_battle.bus_turret_level > 0 &&
                     g_battle.bus_turret_hp > 0 && g_battle.bus_turret_cooldown == 0) {
-                    int bus_cx = (g_battle.bus_x0 + g_battle.bus_x1) / 2;
-                    int bus_cy = (g_battle.bus_y0 + g_battle.bus_y1) / 2;
+                    int bus_cx = g_battle.bus_turret_tx;
+                    int bus_cy = g_battle.bus_turret_ty;
                     int t_rng  = (g_battle.bus_turret_level == 2) ? 11 : 8;
                     int d_bus  = abs(a->x - bus_cx) + abs(a->y - bus_cy);
                     if (d_bus <= t_rng && isomap_has_los(bus_cx, bus_cy, 1, a->x, a->y, a->z)) {
                         int bsx, bsy, asx, asy;
-                        int t_acc = (g_battle.bus_turret_level == 2) ? 88 : 68;
+                        int is_mk2 = (g_battle.bus_turret_level == 2);
+                        int t_acc = is_mk2 ? 88 : 68;
                         hidden_screen_up = 0;
                         any_alien_seen   = 1;
                         ended_with_shot  = 1;
-                        g_battle.bus_turret_cooldown = (g_battle.bus_turret_level == 2) ? 2 : 3;
+                        g_battle.bus_turret_cooldown = is_mk2 ? 2 : 3;
+                        g_battle.bus_turret_dir = (uint8_t)calc_dir_8(a->x - bus_cx, a->y - bus_cy);
                         g_battle.view_level = a->z;
                         isomap_center_camera_on(a->x, a->y, a->z);
                         isomap_tile_to_screen(bus_cx, bus_cy, 1, &bsx, &bsy);
                         isomap_tile_to_screen(a->x, a->y, a->z, &asx, &asy);
-                        set_status("ARV ROOF TURRET INTERCEPTING ALIEN!");
-                        sound_play_weapon(1);
-                        animate_proj_segment(PROJ_LASER, calc_screen_proj_dir(asx - bsx, asy - bsy),
-                                             bsx + 16, bsy, asx + 16, asy - 4, settings_bolt_frames() * 3);
+                        set_status(is_mk2 ? "ARV PLASMA TURRET INTERCEPTING ALIEN!"
+                                          : "ARV LASER TURRET INTERCEPTING ALIEN!");
+                        sound_play_weapon(is_mk2 ? 2 : 1);
+                        animate_proj_segment(is_mk2 ? PROJ_PLASMA : PROJ_LASER,
+                                             calc_screen_proj_dir(asx - bsx, asy - bsy),
+                                             bsx + 16, bsy - 6, asx + 16, asy - 4, settings_bolt_frames() * 3);
                         if ((rand() % 100) < t_acc) {
-                            a->hp -= 36 + (rand() % 18);
-                            play_impact_splash(SPLASH_LASER, asx + 16, asy - 4);
+                            a->hp -= (is_mk2 ? 46 : 36) + (rand() % 18);
+                            play_impact_splash(is_mk2 ? SPLASH_PLASMA : SPLASH_LASER, asx + 16, asy - 4);
                             if (a->hp <= 0) {
-                                kill_unit(i, 0);
+                                resolve_unit_lethal_or_passout(i, 0);
                                 check_victory_state();
                             }
                         } else {
@@ -3556,11 +4370,60 @@ void isomap_end_turn(void) {
 
         if (g_battle.mission_ended != 0) break;
 
-        /* Anti-Abuse: if squad camps in the bus, aliens at range can shoot & disable the ARV Roof Turret! */
-        if (a->active && a->tu >= 15 && g_battle.bus_turret_level > 0 &&
+        /* Cryptid Bio-Weapon & Zombie Melee Attack when adjacent! */
+        if (a->active && is_melee_unit && a->tu >= 12) {
+            int adj_s = -1;
+            for (s = 0; s < MAX_UNITS; s++) {
+                if (g_units[s].active &&
+                    (g_units[s].faction == FACTION_DUFFCOM || g_units[s].faction == FACTION_CIVILIAN) &&
+                    g_units[s].z == a->z &&
+                    abs(g_units[s].x - a->x) + abs(g_units[s].y - a->y) == 1) {
+                    adj_s = s;
+                    break;
+                }
+            }
+            if (adj_s >= 0) {
+                Unit *target = &g_units[adj_s];
+                int tsx, tsy;
+                if (hidden_screen_up) {
+                    hidden_screen_up = 0;
+                    need_hidden_pause = 0;
+                }
+                any_alien_seen = 1;
+                ended_with_shot = 1;
+                a->tu -= 12;
+                a->dir = calc_dir_8(target->x - a->x, target->y - a->y);
+                g_battle.view_level = target->z;
+                isomap_center_camera_on(target->x, target->y, target->z);
+                isomap_tile_to_screen(target->x, target->y, target->z, &tsx, &tsy);
+                sfx_hit();
+                play_impact_splash(SPLASH_HIT_HUMAN, tsx + 16, tsy - 4);
+                if (a->unit_type == 5 && !target->is_drone) {
+                    /* Cryptid biological attack turns operatives & civilians into hostile Zombies! */
+                    target->hp -= 28 + (rand() % 18);
+                    if (target->hp <= 0 || target->faction == FACTION_CIVILIAN || (rand() % 100) < 70) {
+                        infect_unit_into_zombie(adj_s);
+                    } else {
+                        set_status("CRYPTID BIO-CLAW SLASHED OPERATIVE!");
+                    }
+                } else {
+                    target->hp -= 20 + (rand() % 15);
+                    set_status("ZOMBIE MAULED TARGET!");
+                    if (target->hp <= 0) {
+                        resolve_unit_lethal_or_passout(adj_s, i);
+                    }
+                }
+                check_victory_state();
+                if (g_battle.mission_ended != 0) break;
+                game_wait_frames(settings_alien_post_shot_frames());
+            }
+        }
+
+        /* Anti-Abuse: if squad camps in the bus, ranged aliens at range can shoot & disable the ARV Roof Turret! */
+        if (a->active && !is_melee_unit && a->tu >= 15 && g_battle.bus_turret_level > 0 &&
             g_battle.bus_turret_hp > 0 && g_battle.bus_camp_turns >= 2) {
-            int bus_cx = (g_battle.bus_x0 + g_battle.bus_x1) / 2;
-            int bus_cy = (g_battle.bus_y0 + g_battle.bus_y1) / 2;
+            int bus_cx = g_battle.bus_turret_tx;
+            int bus_cy = g_battle.bus_turret_ty;
             int d_bus  = abs(a->x - bus_cx) + abs(a->y - bus_cy);
             if (d_bus <= 16 && isomap_has_los(a->x, a->y, a->z, bus_cx, bus_cy, 1)) {
                 int bsx, bsy;
@@ -3583,8 +4446,8 @@ void isomap_end_turn(void) {
         }
 
 
-        /* If alien still alive and has Line-of-Sight to any DUFF-COM operative (or Civilian) in sight range, fire Plasma! */
-        if (a->active && a->tu >= 15) {
+        /* If ranged alien still alive and has Line-of-Sight to any DUFF-COM operative (or Civilian) in sight range, fire! */
+        if (a->active && !is_melee_unit && item_is_weapon(a->weapon_id) && a->tu >= 15) {
             int shot_s = -1, shot_dist = 999;
             for (s = 0; s < MAX_UNITS; s++) {
                 if (g_units[s].active && g_units[s].faction == FACTION_DUFFCOM) {
@@ -3666,7 +4529,7 @@ void isomap_end_turn(void) {
 
     /* 3. Update Smoke dissipation & Fire burn-down at end of full turn */
     if (g_battle.mission_ended == 0) {
-        static uint8_t prev_active[MAP_LEVS][MAP_H][MAP_W];
+        static uint8_t prev_active[MAP_LEVS][MAX_MAP_H][MAX_MAP_W];
         for (z = 0; z < MAP_LEVS; z++) {
             for (y = 0; y < MAP_H; y++) {
                 for (x = 0; x < MAP_W; x++) {
@@ -3747,7 +4610,7 @@ void isomap_end_turn(void) {
 
         /* 3b. Tick down Primed Timed Grenades on the ground and detonate any whose fuse reaches 0! */
         {
-            int det_x[16], det_y[16], det_z[16], n_det = 0, gk;
+            int det_x[16], det_y[16], det_z[16], det_id[16], n_det = 0, gk;
             for (z = 0; z < MAP_LEVS; z++) {
                 for (y = 0; y < MAP_H; y++) {
                     for (x = 0; x < MAP_W; x++) {
@@ -3760,9 +4623,10 @@ void isomap_end_turn(void) {
                                     c->gnd_item[gk]  = -1;
                                     c->gnd_prime[gk] = -1;
                                     if (n_det < 16) {
-                                        det_x[n_det] = x;
-                                        det_y[n_det] = y;
-                                        det_z[n_det] = z;
+                                        det_x[n_det]  = x;
+                                        det_y[n_det]  = y;
+                                        det_z[n_det]  = z;
+                                        det_id[n_det] = gid;
                                         n_det++;
                                     }
                                 }
@@ -3783,7 +4647,11 @@ void isomap_end_turn(void) {
                 g_battle.view_level = det_z[gk];
                 isomap_center_camera_on(det_x[gk], det_y[gk], det_z[gk]);
                 set_status("TIMED GRENADE DETONATED!");
-                detonate_explosion(det_x[gk], det_y[gk], det_z[gk], 0);
+                if (det_id[gk] == ITEM_STUN_GRENADE) {
+                    detonate_stun_explosion(det_x[gk], det_y[gk], det_z[gk], 0);
+                } else {
+                    detonate_explosion(det_x[gk], det_y[gk], det_z[gk], 0);
+                }
                 isomap_recalc_lighting_and_fov();
                 check_victory_state();
             }
@@ -3797,13 +4665,133 @@ void isomap_end_turn(void) {
         }
     }
 
-    /* 4. Refill DUFF-COM Squad Time Units & Energy for next turn */
-    for (i = 0; i < MAX_UNITS; i++) {
-        if (g_units[i].active && g_units[i].faction == 0) {
-            g_units[i].tu = g_units[i].tu_max;
-            g_units[i].energy += 20;
-            if (g_units[i].energy > g_units[i].energy_max)
-                g_units[i].energy = g_units[i].energy_max;
+    /* 4a. Tick Mind Control Expiration & Unconscious Bleed-Out / Stun Recovery */
+    for (i = 0; i < MAX_UNITS && g_battle.mission_ended == 0; i++) {
+        Unit *u = &g_units[i];
+        if (u->active && u->mind_control_turns > 0) {
+            u->mind_control_turns--;
+            if (u->mind_control_turns == 0) {
+                char mc_msg[64];
+                u->controlled_by_faction = u->orig_faction;
+                u->faction               = u->orig_faction;
+                snprintf(mc_msg, sizeof(mc_msg), "MIND CONTROL ENDED ON %s!", u->name);
+                set_status(mc_msg);
+            }
+        }
+        if (!u->active && u->is_unconscious) {
+            if (u->orig_faction == FACTION_DUFFCOM && !u->is_zombie && u->bleed_turns > 0) {
+                u->bleed_turns--;
+                if (u->bleed_turns == 0) {
+                    /* Unattended operative bled out and died! */
+                    char bmsg[64];
+                    int si;
+                    u->is_unconscious = 0;
+                    u->is_corpse      = 1;
+                    u->hp             = 0;
+                    if (u->rhand_item >= 0) { isomap_drop_ground_item(u->x, u->y, u->z, u->rhand_item); u->rhand_item = ITEM_NONE; }
+                    if (u->lhand_item >= 0) { isomap_drop_ground_item(u->x, u->y, u->z, u->lhand_item); u->lhand_item = ITEM_NONE; }
+                    for (si = 0; si < INV_BELT_SMALL; si++) {
+                        if (u->belt_small[si] >= 0) { isomap_drop_ground_item(u->x, u->y, u->z, u->belt_small[si]); u->belt_small[si] = ITEM_NONE; }
+                    }
+                    for (si = 0; si < INV_BELT_LARGE; si++) {
+                        if (u->belt_large[si] >= 0) { isomap_drop_ground_item(u->x, u->y, u->z, u->belt_large[si]); u->belt_large[si] = ITEM_NONE; }
+                    }
+                    for (si = 0; si < INV_BACKPACK_SZ; si++) {
+                        if (u->backpack[si] >= 0) { isomap_drop_ground_item(u->x, u->y, u->z, u->backpack[si]); u->backpack[si] = ITEM_NONE; }
+                    }
+                    isomap_sync_unit_inventory(u);
+                    apply_squad_morale_event(0);
+                    snprintf(bmsg, sizeof(bmsg), "%s BLED OUT FROM UNATTENDED WOUNDS!", u->name);
+                    set_status(bmsg);
+                    check_victory_state();
+                }
+            } else if (u->stun_dmg > 0) {
+                u->stun_dmg -= 5;
+                if (u->stun_dmg < u->hp && g_map[u->z][u->y][u->x].unit_idx == -1) {
+                    u->is_unconscious = 0;
+                    u->active         = 1;
+                    u->tu             = u->tu_max / 2;
+                    g_map[u->z][u->y][u->x].unit_idx = (int8_t)i;
+                }
+            }
+        }
+    }
+
+    /* 4. Refill DUFF-COM Squad Time Units & Energy, and check Morale / Mental Breakdown! */
+    for (i = 0; i < MAX_UNITS && g_battle.mission_ended == 0; i++) {
+        Unit *u = &g_units[i];
+        if (u->active && u->faction == 0) {
+            u->tu = u->tu_max;
+            u->energy += 20;
+            if (u->energy > u->energy_max)
+                u->energy = u->energy_max;
+            if (!u->is_drone && u->orig_faction == FACTION_DUFFCOM) {
+                int m_rec = 8 + (u->bravery / 20);
+                if (u->morale + m_rec > 100) u->morale = 100;
+                else                         u->morale += (uint8_t)m_rec;
+
+                /* Mental Breakdown check when operative morale is below 50 */
+                if (u->morale < 50 && (rand() % 100) < (52 - (int)u->morale)) {
+                    char mb_msg[64];
+                    g_battle.view_level = u->z;
+                    isomap_center_camera_on(u->x, u->y, u->z);
+                    if ((rand() & 1) && item_is_weapon(u->weapon_id) && u->ammo > 0) {
+                        /* Berserk: fires wildly into the void! */
+                        int rx = u->x + (rand() % 7) - 3;
+                        int ry = u->y + (rand() % 7) - 3;
+                        if (rx < 1) rx = 1;
+                        if (rx >= MAP_W - 1) rx = MAP_W - 2;
+                        if (ry < 1) ry = 1;
+                        if (ry >= MAP_H - 1) ry = MAP_H - 2;
+                        if (rx == u->x && ry == u->y) rx = (u->x > 2) ? (u->x - 2) : (u->x + 2);
+                        snprintf(mb_msg, sizeof(mb_msg), "MENTAL BREAKDOWN! %s FIRES WILDLY!", u->name);
+                        set_status(mb_msg);
+                        u->ammo--;
+                        if (u->rhand_item == u->weapon_id) u->rhand_ammo = u->ammo;
+                        else if (u->lhand_item == u->weapon_id) u->lhand_ammo = u->ammo;
+                        execute_raycast_shot(i, rx, ry, u->z, 15);
+                    } else {
+                        /* Panic: drops weapon in hand and runs! */
+                        int tries;
+                        if (u->rhand_item >= 0) {
+                            int id = u->rhand_item;
+                            int a_id = item_is_weapon(id) ? item_get_def(id)->ammo_item_id : ITEM_NONE;
+                            isomap_drop_ground_item_primed(u->x, u->y, u->z, id, u->slot_prime[0]);
+                            if (item_is_ammo(a_id) && u->rhand_ammo > 0) {
+                                isomap_drop_ground_item(u->x, u->y, u->z, a_id);
+                            }
+                            u->rhand_item = ITEM_NONE; u->rhand_ammo = 0; u->slot_prime[0] = -1;
+                            isomap_sync_unit_inventory(u);
+                        }
+                        for (tries = 0; tries < 8; tries++) {
+                            static const int pdx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
+                            static const int pdy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
+                            int d = rand() & 7;
+                            int nx = u->x + pdx[d], ny = u->y + pdy[d];
+                            if ((unsigned)nx < MAP_W && (unsigned)ny < MAP_H &&
+                                g_map[u->z][ny][nx].floor_id != FLOOR_NONE &&
+                                g_map[u->z][ny][nx].unit_idx == -1 &&
+                                g_map[u->z][ny][nx].obj_id == OBJ_NONE &&
+                                isomap_has_los(u->x, u->y, u->z, nx, ny, u->z)) {
+                                g_map[u->z][u->y][u->x].unit_idx = -1;
+                                u->x = nx; u->y = ny; u->dir = d;
+                                g_map[u->z][u->y][u->x].unit_idx = (int8_t)i;
+                                break;
+                            }
+                        }
+                        snprintf(mb_msg, sizeof(mb_msg), "MENTAL BREAKDOWN! %s PANICKED & RAN!", u->name);
+                        set_status(mb_msg);
+                        sfx_beep(300, 80);
+                        isomap_render();
+                        hud_render();
+                        vga_flip();
+                        game_wait_frames(settings_alien_post_shot_frames());
+                    }
+                    u->tu = 0;
+                    if (u->morale + 22 > 100) u->morale = 100;
+                    else                      u->morale += 22;
+                }
+            }
         }
     }
 
@@ -3872,6 +4860,7 @@ static int preview_ray_wall(int x0, int y0, int z0, int tx, int ty, int tz,
         int prev_x = x, prev_y = y, prev_z = z;
         int edge_seen;
         int direct_aim;
+        int w_wx[2], w_wy[2], w_north[2], w_cnt = 0, wi;
 
         ex -= dx; if (ex < 0) { ex += dm; x += sx; }
         ey -= dy; if (ey < 0) { ey += dm; y += sy; }
@@ -3884,25 +4873,35 @@ static int preview_ray_wall(int x0, int y0, int z0, int tx, int ty, int tz,
         edge_seen  = (g_map[z][prev_y][prev_x].fog != FOG_UNSEEN || g_map[z][y][x].fog != FOG_UNSEEN);
         direct_aim = (!aim_has_target && x == tx && y == ty && z == tz);
 
-        if (x != prev_x) {
+        if (x != prev_x && y == prev_y) {
+            w_wx[0] = (x > prev_x) ? x : prev_x;
+            w_wy[0] = prev_y;
+            w_north[0] = 0;
+            w_cnt = 1;
+        } else if (y != prev_y && x == prev_x) {
+            w_wx[0] = prev_x;
+            w_wy[0] = (y > prev_y) ? y : prev_y;
+            w_north[0] = 1;
+            w_cnt = 1;
+        } else if (x != prev_x && y != prev_y) {
             int wx = (x > prev_x) ? x : prev_x;
-            int wy = (x > prev_x) ? y : prev_y;
-            uint8_t w  = g_map[z][wy][wx].wall_west;
-            uint8_t hp = g_map[z][wy][wx].wall_west_hp;
-            if (w != WALL_NONE && !isomap_is_door_open(w) && edge_seen) {
-                if (isomap_wall_blocks_los(w) || direct_aim) {
-                    *out_w  = w;
-                    *out_hp = hp ? hp : isomap_wall_max_hp(w);
-                    return 1;
-                }
+            int wy = (y > prev_y) ? y : prev_y;
+            int lhs = (2 * abs(prev_y - y0) + 1) * dx;
+            int rhs = (2 * abs(prev_x - x0) + 1) * dy;
+            if (lhs < rhs) {
+                w_wx[0] = prev_x; w_wy[0] = wy; w_north[0] = 1;
+                w_wx[1] = wx;     w_wy[1] = y;  w_north[1] = 0;
+            } else {
+                w_wx[0] = wx; w_wy[0] = prev_y; w_north[0] = 0;
+                w_wx[1] = x;  w_wy[1] = wy;     w_north[1] = 1;
             }
+            w_cnt = 2;
         }
 
-        if (y != prev_y) {
-            int wx = (y > prev_y) ? x : prev_x;
-            int wy = (y > prev_y) ? y : prev_y;
-            uint8_t w  = g_map[z][wy][wx].wall_north;
-            uint8_t hp = g_map[z][wy][wx].wall_north_hp;
+        for (wi = 0; wi < w_cnt; wi++) {
+            int wx = w_wx[wi], wy = w_wy[wi], is_n = w_north[wi];
+            uint8_t w  = is_n ? g_map[z][wy][wx].wall_north : g_map[z][wy][wx].wall_west;
+            uint8_t hp = is_n ? g_map[z][wy][wx].wall_north_hp : g_map[z][wy][wx].wall_west_hp;
             if (w != WALL_NONE && !isomap_is_door_open(w) && edge_seen) {
                 if (isomap_wall_blocks_los(w) || direct_aim) {
                     *out_w  = w;
@@ -3926,7 +4925,15 @@ int isomap_get_cursor_mode(void) {
 
     if (g_battle.fire_mode > 0) {
         int clear;
-        if (g_battle.fire_mode >= 4) {
+        if (g_battle.fire_mode == 7) {
+            clear = (g_battle.view_level == sel_u->z &&
+                     abs(g_battle.cur_x - sel_u->x) + abs(g_battle.cur_y - sel_u->y) <= 1);
+        } else if (g_battle.fire_mode == 8) {
+            clear = (g_battle.view_level == sel_u->z &&
+                     abs(g_battle.cur_x - sel_u->x) + abs(g_battle.cur_y - sel_u->y) == 1);
+        } else if (g_battle.fire_mode == 9) {
+            clear = (abs(g_battle.cur_x - sel_u->x) + abs(g_battle.cur_y - sel_u->y) <= 14);
+        } else if (g_battle.fire_mode >= 4) {
             int max_rng = (g_battle.fire_mode == 5) ? 12 : 10;
             clear = (abs(g_battle.cur_x - sel_u->x) + abs(g_battle.cur_y - sel_u->y) <= max_rng);
         } else {
@@ -4401,13 +5408,33 @@ void isomap_render(void) {
                                     spr_objects[cell->obj_id], obj_shade, VIEWPORT_H);
                 }
 
-                /* 3a. Persistent Corpses & Ground Items lying in place on (x, y, z) */
+                /* 3_turret. Rotating ARV Roof Defense Turret at rear roof (z == 1) */
+                if (z == 1 && x == g_battle.bus_turret_tx && y == g_battle.bus_turret_ty &&
+                    g_battle.bus_turret_level > 0 && g_battle.bus_turret_hp > 0) {
+                    int t_idx = (g_battle.bus_turret_level >= 2) ? 1 : 0;
+                    int t_dir = g_battle.bus_turret_dir & 7;
+                    vga_blit_shaded(sx + 4, sy - 16, UNIT_W, UNIT_H,
+                                    spr_arv_turret[t_idx][t_dir], shade, VIEWPORT_H);
+                }
+
+                /* 3a. Persistent Corpses, Unconscious Units & Ground Items lying in place on (x, y, z) */
                 for (u_idx = 0; u_idx < MAX_UNITS; u_idx++) {
                     Unit *cu = &g_units[u_idx];
-                    if (cu->is_corpse && cu->z == z && cu->y == y && cu->x == x) {
+                    if ((cu->is_corpse || (cu->is_unconscious && !cu->active)) &&
+                        cu->z == z && cu->y == y && cu->x == x) {
                         vga_blit_shaded(sx, sy - 16, DEATH_W, DEATH_H,
                                         spr_deaths[cu->sprite_id % NUM_UNIT_SPRITES][3],
                                         shade, VIEWPORT_H);
+                        if (cu->is_unconscious && !cu->active && sy - 12 >= 0 && sy - 4 < VIEWPORT_H) {
+                            if (cu->orig_faction == FACTION_DUFFCOM && cu->bleed_turns > 0) {
+                                char btag[12];
+                                uint8_t bcol = ((g_battle.anim_tick / 8) & 1) ? 33 : 96;
+                                snprintf(btag, sizeof(btag), "+BLD:%d+", (int)cu->bleed_turns);
+                                vga_print_shadow(sx + 1, sy - 10, btag, bcol, 15);
+                            } else if (cu->orig_faction == FACTION_ALIEN) {
+                                vga_print_shadow(sx + 6, sy - 10, "STUN", 144, 15);
+                            }
+                        }
                     }
                 }
                 {
@@ -4603,7 +5630,13 @@ void isomap_render(void) {
         char acc_str[24];
         isomap_tile_to_screen(g_battle.cur_x, g_battle.cur_y, g_battle.view_level, &sx1, &sy1);
 
-        if (g_battle.fire_mode == 5) {
+        if (g_battle.fire_mode == 7) {
+            snprintf(acc_str, sizeof(acc_str), clear ? "MEDKIT USE" : "NEED ADJ");
+        } else if (g_battle.fire_mode == 8) {
+            snprintf(acc_str, sizeof(acc_str), clear ? "STUN ROD" : "NEED ADJ");
+        } else if (g_battle.fire_mode == 9) {
+            snprintf(acc_str, sizeof(acc_str), clear ? "MIND PROBE" : "OUT OF RNG");
+        } else if (g_battle.fire_mode == 5) {
             snprintf(acc_str, sizeof(acc_str), clear ? "FLARE OK" : "TOO FAR");
         } else if (g_battle.fire_mode == 4 || g_battle.fire_mode == 6) {
             snprintf(acc_str, sizeof(acc_str), clear ? "THR:%d%%" : "OUT OF RANGE", sel_u->throw_acc);
@@ -4684,7 +5717,10 @@ void isomap_render(void) {
                       ? (XP_MISSION_VICTORY + (g_battle.night_mode ? XP_NIGHT_BONUS : 0)) : 0;
 
         for (i = 0; i < MAX_SQUAD_SIZE; i++) {
-            if (!g_units[i].active || g_units[i].is_corpse || g_units[i].hp <= 0) {
+            if (g_units[i].hp_max <= 0) continue;
+            if ((!g_units[i].active && !g_units[i].is_unconscious) ||
+                g_units[i].is_corpse || g_units[i].is_zombie ||
+                (g_battle.mission_ended == 2)) {
                 kia_cnt++;
             } else {
                 int end_xp = g_units[i].xp_start + g_units[i].xp_gained + surv_xp;
@@ -4699,60 +5735,70 @@ void isomap_render(void) {
             }
         }
 
-        vga_rect_bevel(28, 6, 264, 134, 74, 96, 79);
-        vga_rect_fill(32, 10, 256, 126, 14);
-        vga_print_shadow(62, 13,
+        vga_rect_bevel(24, 4, 272, 138, 74, 96, 79);
+        vga_rect_fill(28, 8, 264, 130, 14);
+        vga_print_shadow(62, 11,
                          g_battle.mission_ended == 1 ? "MISSION ACCOMPLISHED!" : "MISSION FAILED!",
                          g_battle.mission_ended == 1 ? 96 : 33, 15);
-        vga_print(40, 24, biome_titles[g_battle.biome_id], 80);
+        vga_print(36, 22, biome_titles[g_battle.biome_id], 80);
 
-        snprintf(stat_buf, sizeof(stat_buf), "ALIENS KILLED:%-2d KIA:%d SCORE:%d",
-                 g_battle.aliens_killed, kia_cnt, g_battle.mission_score);
-        vga_print(40, 34, stat_buf, kia_cnt > 0 ? 113 : 18);
+        snprintf(stat_buf, sizeof(stat_buf), "KILLED:%-2d CAPTURED:%-2d KIA:%d SCR:%d",
+                 g_battle.aliens_killed, g_battle.aliens_captured, kia_cnt, g_battle.mission_score);
+        vga_print(36, 32, stat_buf, kia_cnt > 0 ? 113 : 18);
 
         snprintf(stat_buf, sizeof(stat_buf), "CIVILIANS SAVED:%d/%d  KILLED:%d",
                  g_battle.civilians_saved, g_battle.civilians_total, g_battle.civilians_killed);
-        vga_print(40, 44, stat_buf, g_battle.civilians_killed > 0 ? 113 : 80);
+        vga_print(36, 42, stat_buf, g_battle.civilians_killed > 0 ? 113 : 80);
 
         snprintf(stat_buf, sizeof(stat_buf), "SALVAGE:+%d ALLOY +%d ELER DMG:%d",
                  g_battle.alloys_recovered, g_battle.elerium_recovered, g_battle.map_damage);
-        vga_print(40, 54, stat_buf, 144);
+        vga_print(36, 52, stat_buf, 144);
 
         if (g_battle.mission_ended == 1) {
             snprintf(stat_buf, sizeof(stat_buf), "TECH: +%d NAV +%d CRYO +%d POD +%d BODY",
                      g_battle.nav_recovered, g_battle.cryo_recovered,
                      g_battle.pods_recovered, g_battle.corpses_recovered);
-            vga_print(40, 64, stat_buf, 81);
-            snprintf(stat_buf, sizeof(stat_buf), "SURVIVAL XP: +%d XP (+COMBAT XP)", surv_xp);
-            vga_print(40, 74, stat_buf, 80);
+            vga_print(36, 62, stat_buf, 81);
+            if (g_camp.debrief_died_no_containment > 0) {
+                snprintf(stat_buf, sizeof(stat_buf), "NO CONTAINMENT: %d LIVE ALIEN(S) DIED!",
+                         g_camp.debrief_died_no_containment);
+                vga_print_shadow(36, 72, stat_buf, 33, 15);
+            } else if (g_camp.debrief_live_captured > 0) {
+                snprintf(stat_buf, sizeof(stat_buf), "CONTAINMENT: %d LIVE ALIEN(S) SECURED!",
+                         g_camp.debrief_live_captured);
+                vga_print(36, 72, stat_buf, 18);
+            } else {
+                snprintf(stat_buf, sizeof(stat_buf), "SURVIVAL XP: +%d XP (+COMBAT XP)", surv_xp);
+                vga_print(36, 72, stat_buf, 80);
+            }
         } else {
-            vga_print(40, 68, "ENTIRE SQUAD LOST IN ACTION!", 33);
+            vga_print(36, 64, "ENTIRE SQUAD LOST IN ACTION!", 33);
+            vga_print(36, 74, "ALL DEPLOYED WEAPONS & GEAR LOST!", 113);
         }
 
         if (promo_cnt == 1 && first_promo_idx >= 0) {
             const char *base_n = operative_strip_rank_prefix(g_units[first_promo_idx].name);
             snprintf(stat_buf, sizeof(stat_buf), "PROMOTED: %s %s!",
                      operative_rank_prefix(first_promo_rank), base_n);
-            vga_print_shadow(40, 86, stat_buf, 96, 15);
-            vga_print(40, 97, "RANK UP: +MAX TU, +AIM, +HP, +RCN!", 18);
+            vga_print_shadow(36, 86, stat_buf, 96, 15);
+            vga_print(36, 97, "RANK UP: +MAX TU, +AIM, +HP, +RCN!", 18);
         } else if (promo_cnt > 1) {
             snprintf(stat_buf, sizeof(stat_buf), "PROMOTIONS: %d OPERATIVES RANKED UP!", promo_cnt);
-            vga_print_shadow(40, 86, stat_buf, 96, 15);
-            vga_print(40, 97, "RANK UP: +MAX TU, +AIM, +HP, +RCN!", 18);
+            vga_print_shadow(36, 86, stat_buf, 96, 15);
+            vga_print(36, 97, "RANK UP: +MAX TU, +AIM, +HP, +RCN!", 18);
         } else if (g_battle.mission_ended == 1) {
-            vga_print(40, 86, "SQUAD GAINED COMBAT EXPERIENCE!", 96);
+            vga_print(36, 86, "SQUAD GAINED COMBAT EXPERIENCE!", 96);
             if (kia_cnt > 0) {
-                snprintf(stat_buf, sizeof(stat_buf), "%d KIA - NEW ROOKIE%s ASSIGNED AT HQ",
-                         kia_cnt, kia_cnt > 1 ? "S" : "");
-                vga_print(40, 97, stat_buf, 113);
+                snprintf(stat_buf, sizeof(stat_buf), "%d KIA - HIRE REPLACEMENTS AT HQ", kia_cnt);
+                vga_print(36, 97, stat_buf, 113);
             } else {
-                vga_print(40, 97, "NO CASUALTIES - FULL SQUAD INTACT", 2);
+                vga_print(36, 97, "NO CASUALTIES - FULL SQUAD INTACT", 2);
             }
         } else {
-            vga_print(40, 86, "PERMADEATH: FALLEN AGENTS RECORDED", 113);
-            vga_print(40, 97, "HQ ASSIGNING REPLACEMENT ROOKIES...", 2);
+            vga_print(36, 86, "PERMADEATH: FALLEN AGENTS RECORDED", 113);
+            vga_print(36, 97, "REPLENISH GEAR & RECRUIT AT HQ...", 2);
         }
 
-        vga_print_shadow(56, 121, "CLICK OR PRESS ENTER FOR HQ!", 96, 15);
+        vga_print_shadow(56, 123, "CLICK OR PRESS ENTER FOR HQ!", 96, 15);
     }
 }

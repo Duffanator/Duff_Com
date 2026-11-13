@@ -22,12 +22,12 @@ typedef struct {
     int stories;
 } BldgRect;
 
-#define MAX_PROC_BLDGS 12
+#define MAX_PROC_BLDGS 20
 #define LOT_MAX_X      (MAP_W - 3)
 #define LOT_MAX_Y      (MAP_H - 3)
 
-static uint8_t zone_map[MAP_H][MAP_W];
-static uint8_t reach_mask[MAP_LEVS][MAP_H][MAP_W];
+static uint8_t zone_map[MAX_MAP_H][MAX_MAP_W];
+static uint8_t reach_mask[MAP_LEVS][MAX_MAP_H][MAX_MAP_W];
 
 static BldgRect g_bldgs[MAX_PROC_BLDGS];
 static int      g_num_bldgs = 0;
@@ -394,17 +394,48 @@ static void place_ufo_edge_between(int x0, int y0, int x1, int y1, uint8_t wall_
     else if (y0 == y1 + 1 && x1 == x0) g_map[0][y0][x0].wall_north = wall_type;
 }
 
-static void place_ufo_prop_local(int ux, int uy, int sz, int door_side, int rx, int ry, uint8_t obj_id) {
+static void place_ufo_prop_local_z(int z, int ux, int uy, int sz, int door_side, int rx, int ry, uint8_t obj_id) {
     int wx, wy;
     ufo_rot_xy(ux, uy, sz, door_side, rx, ry, &wx, &wy);
-    if ((unsigned)wx < MAP_W && (unsigned)wy < MAP_H && g_map[0][wy][wx].obj_id == OBJ_NONE) {
-        g_map[0][wy][wx].obj_id = obj_id;
+    if ((unsigned)wx < MAP_W && (unsigned)wy < MAP_H &&
+        (unsigned)z < MAP_LEVS && g_map[z][wy][wx].obj_id == OBJ_NONE) {
+        g_map[z][wy][wx].obj_id = obj_id;
     }
 }
 
-/* Place Rounded Futuristic Alien Saucer (5x5 Scout or 7x7 Multi-Room Cruiser/Battleship, Landed or Crashed!) */
+static void place_ufo_prop_local(int ux, int uy, int sz, int door_side, int rx, int ry, uint8_t obj_id) {
+    place_ufo_prop_local_z(0, ux, uy, sz, door_side, rx, ry, obj_id);
+}
+
+/* Build an enclosed 2nd-story UFO Upper Bridge / Command Deck on z=1 with roof on z=2 */
+static void build_ufo_upper_deck(int ux0, int uy0, int ux1, int uy1, int door_side) {
+    int x, y;
+    for (y = uy0; y <= uy1; y++) {
+        for (x = ux0; x <= ux1; x++) {
+            g_map[1][y][x].floor_id   = FLOOR_UFO_DECK;
+            g_map[1][y][x].wall_west  = WALL_NONE;
+            g_map[1][y][x].wall_north = WALL_NONE;
+            g_map[2][y][x].floor_id   = FLOOR_UFO_ROOF;
+        }
+    }
+    for (x = ux0; x <= ux1; x++) {
+        g_map[1][uy0][x].wall_north     = WALL_UFO_HULL;
+        g_map[1][uy1 + 1][x].wall_north = WALL_UFO_HULL;
+    }
+    for (y = uy0; y <= uy1; y++) {
+        g_map[1][y][ux0].wall_west     = WALL_UFO_HULL;
+        g_map[1][y][ux1 + 1].wall_west = WALL_UFO_HULL;
+    }
+    /* Upper deck airlock opening onto the outer z=1 saucer hull terrace */
+    if (door_side == 0)      g_map[1][uy0][(ux0 + ux1) / 2].wall_north     = WALL_UFO_DOOR_CLOSED;
+    else if (door_side == 2) g_map[1][uy1 + 1][(ux0 + ux1) / 2].wall_north = WALL_UFO_DOOR_CLOSED;
+    else if (door_side == 3) g_map[1][(uy0 + uy1) / 2][ux0].wall_west      = WALL_UFO_DOOR_CLOSED;
+    else                     g_map[1][(uy0 + uy1) / 2][ux1 + 1].wall_west  = WALL_UFO_DOOR_CLOSED;
+}
+
+/* Place Rounded Futuristic Alien Saucer (5x5 Scout, 7x7 Harvester, 9x9 Abductor, 11x11 Command Ship) */
 static void place_procedural_ufo(void) {
-    int ufo_class = 0; /* 0=Small Scout (5x5), 1=Medium Cruiser (7x7), 2=Large Assault Ship (7x7 Heavy) */
+    int ufo_class = g_battle.ufo_class; /* 0=Scout(5x5), 1=Harvester(7x7), 2=Abductor(9x9), 3=Command(11x11) */
     int sz = 5;
     int crashed = 0;   /* Unless shot down (severity == 0), landed UFOs are completely undamaged! */
     int min_x = 2, max_x = LOT_MAX_X, min_y = 2, max_y = LOT_MAX_Y;
@@ -416,9 +447,12 @@ static void place_procedural_ufo(void) {
         const RadarEvent *ev = &g_camp.events[g_camp.launched_event];
         crashed   = (ev->severity == 0) ? 1 : 0;
         ufo_class = ev->ufo_size;
-        sz        = (ufo_class == 0) ? 5 : 7;
     }
-
+    g_battle.ufo_class = ufo_class;
+    sz = (ufo_class == 0) ? 5 :
+         (ufo_class == 1) ? 7 :
+         (ufo_class == 2) ? 9 : 11;
+    if (sz > MAP_W - 10) sz = 7;
 
     ux = (MAP_W - sz) / 2;
     uy = 3;
@@ -441,7 +475,7 @@ static void place_procedural_ufo(void) {
     g_ufo_rect.valid = 1;
     g_ufo_rect.x0 = ux;  g_ufo_rect.y0 = uy;
     g_ufo_rect.x1 = ux1; g_ufo_rect.y1 = uy1;
-    g_ufo_rect.stories = 1;
+    g_ufo_rect.stories = (ufo_class >= 1) ? 2 : 1;
     g_ufo_sz = sz;
 
     /* Optional scorched skid-furrow trailing behind a crash-landed UFO */
@@ -522,42 +556,74 @@ static void place_procedural_ufo(void) {
         }
     }
 
-    /* Furnish Alien Saucer Interior: Dedicated Navigation Area, Reactor Core, Cryo, Pods & Grav-Lift */
-    if (sz == 7) {
+    /* Furnish Alien Saucer Interior: Dedicated Navigation Area, Reactor Core, Cryo, Pods & Multi-Level Decks! */
+    if (sz >= 7) {
         int rx;
-        /* Internal Cruiser Bulkhead + Centered Alien Airlock sealing the Navigation Bridge (ry=0..1) */
+        int mid = sz / 2;
+        /* Internal Bulkhead + Centered Alien Airlock sealing the Forward Lower Bay (ry=0..1) */
         for (rx = 0; rx < sz; rx++) {
             int x_fwd, y_fwd, x_aft, y_aft;
-            uint8_t bw = (rx == sz / 2) ? WALL_UFO_DOOR_CLOSED : WALL_UFO_HULL;
+            uint8_t bw = (rx == mid) ? WALL_UFO_DOOR_CLOSED : WALL_UFO_HULL;
             ufo_rot_xy(ux, uy, sz, door_side, rx, 1, &x_fwd, &y_fwd);
             ufo_rot_xy(ux, uy, sz, door_side, rx, 2, &x_aft, &y_aft);
             place_ufo_edge_between(x_fwd, y_fwd, x_aft, y_aft, bw);
         }
 
-        /* Forward Navigation Bridge: Twin Holo Star-Maps + Alien Flight Telemetry Banks */
-        place_ufo_prop_local(ux, uy, sz, door_side, 1, 0, OBJ_UFO_COMPUTER);
-        place_ufo_prop_local(ux, uy, sz, door_side, 2, 0, OBJ_UFO_NAV);
-        place_ufo_prop_local(ux, uy, sz, door_side, 4, 0, OBJ_UFO_NAV);
-        place_ufo_prop_local(ux, uy, sz, door_side, 5, 0, OBJ_UFO_COMPUTER);
+        /* Forward Lower Bay: Holo Star-Maps + Alien Flight Telemetry Banks */
+        place_ufo_prop_local(ux, uy, sz, door_side, 1,       0, OBJ_UFO_COMPUTER);
+        place_ufo_prop_local(ux, uy, sz, door_side, mid - 1, 0, OBJ_UFO_NAV);
+        place_ufo_prop_local(ux, uy, sz, door_side, mid + 1, 0, OBJ_UFO_NAV);
+        place_ufo_prop_local(ux, uy, sz, door_side, sz - 2,  0, OBJ_UFO_COMPUTER);
 
-        /* Main Reactor & Bio-Stasis Deck: Central Elerium Core, Cryo Chambers, Tech Pods & Grav-Lift */
-        place_ufo_prop_local(ux, uy, sz, door_side, 3, 3, OBJ_UFO_CORE);
-        place_ufo_prop_local(ux, uy, sz, door_side, 1, 2, OBJ_UFO_CRYO);
-        place_ufo_prop_local(ux, uy, sz, door_side, 5, 2, OBJ_UFO_CRYO);
-        place_ufo_prop_local(ux, uy, sz, door_side, 1, 4, OBJ_UFO_POD);
-        place_ufo_prop_local(ux, uy, sz, door_side, 2, 5, OBJ_UFO_POD);
-        place_ufo_prop_local(ux, uy, sz, door_side, 4, 5, OBJ_UFO_POD);
-        place_ufo_prop_local(ux, uy, sz, door_side, 5, 4, OBJ_UFO_GRAVLIFT);
+        /* Main Reactor & Bio-Stasis Deck: Central Elerium Core, Cryo Chambers, Tech Pods & Grav-Lifts */
+        place_ufo_prop_local(ux, uy, sz, door_side, mid,     mid,     OBJ_UFO_CORE);
+        place_ufo_prop_local(ux, uy, sz, door_side, 1,       2,       OBJ_UFO_CRYO);
+        place_ufo_prop_local(ux, uy, sz, door_side, sz - 2,  2,       OBJ_UFO_CRYO);
+        place_ufo_prop_local(ux, uy, sz, door_side, 1,       sz - 3,  OBJ_UFO_POD);
+        place_ufo_prop_local(ux, uy, sz, door_side, mid - 1, sz - 2,  OBJ_UFO_POD);
+        place_ufo_prop_local(ux, uy, sz, door_side, mid + 1, sz - 2,  OBJ_UFO_POD);
+        place_ufo_prop_local(ux, uy, sz, door_side, mid + 1, mid,     OBJ_UFO_GRAVLIFT);
 
-        /* Large Assault Ships carry a Twin Elerium Reactor Core & extra Stasis/Ordnance Pods! */
-        if (ufo_class >= 2) {
-            place_ufo_prop_local(ux, uy, sz, door_side, 3, 4, OBJ_UFO_CORE);
-            place_ufo_prop_local(ux, uy, sz, door_side, 3, 5, OBJ_UFO_POD);
-            place_ufo_prop_local(ux, uy, sz, door_side, 1, 3, OBJ_UFO_CRYO);
-            place_ufo_prop_local(ux, uy, sz, door_side, 5, 3, OBJ_UFO_CRYO);
+        if (ufo_class == 1) {
+            /* 7x7 Harvester: 3x3 Upper Command Deck on z=1 */
+            build_ufo_upper_deck(cx - 1, cy - 1, cx + 1, cy + 1, door_side);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid - 1, mid - 1, OBJ_UFO_NAV);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid + 1, mid - 1, OBJ_UFO_COMPUTER);
+        } else if (ufo_class == 2) {
+            /* 9x9 Large Abductor: Twin Elerium Cores + 5x5 Upper Bridge Deck on z=1 */
+            place_ufo_prop_local(ux, uy, sz, door_side, mid,     mid + 1, OBJ_UFO_CORE);
+            place_ufo_prop_local(ux, uy, sz, door_side, mid - 1, mid,     OBJ_UFO_GRAVLIFT);
+            place_ufo_prop_local(ux, uy, sz, door_side, 1,       3,       OBJ_UFO_CRYO);
+            place_ufo_prop_local(ux, uy, sz, door_side, sz - 2,  3,       OBJ_UFO_CRYO);
+            build_ufo_upper_deck(cx - 2, cy - 2, cx + 2, cy + 2, door_side);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid - 1, mid - 2, OBJ_UFO_NAV);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid + 1, mid - 2, OBJ_UFO_NAV);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid - 2, mid,     OBJ_UFO_CRYO);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid + 2, mid,     OBJ_UFO_POD);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid + 1, mid + 1, OBJ_UFO_GRAVLIFT);
+        } else if (ufo_class >= 3) {
+            /* 11x11 Command Dreadnought: Quad Reactor Cores, Secondary Airlocks + 5x5 Fortified Command Bridge on z=1! */
+            place_ufo_prop_local(ux, uy, sz, door_side, mid,     mid + 1, OBJ_UFO_CORE);
+            place_ufo_prop_local(ux, uy, sz, door_side, mid - 2, mid,     OBJ_UFO_CORE);
+            place_ufo_prop_local(ux, uy, sz, door_side, mid + 2, mid,     OBJ_UFO_CORE);
+            place_ufo_prop_local(ux, uy, sz, door_side, mid - 1, mid,     OBJ_UFO_GRAVLIFT);
+            place_ufo_prop_local(ux, uy, sz, door_side, 1,       3,       OBJ_UFO_CRYO);
+            place_ufo_prop_local(ux, uy, sz, door_side, sz - 2,  3,       OBJ_UFO_CRYO);
+            place_ufo_prop_local(ux, uy, sz, door_side, 2,       sz - 3,  OBJ_UFO_POD);
+            place_ufo_prop_local(ux, uy, sz, door_side, sz - 3,  sz - 3,  OBJ_UFO_POD);
+            /* Flank airlocks on Command Ship */
+            carve_rect_door(ux, uy, ux1, uy1, (door_side + 1) & 3, (door_side & 1) ? cx : cy, WALL_UFO_DOOR_CLOSED);
+            carve_rect_door(ux, uy, ux1, uy1, (door_side + 3) & 3, (door_side & 1) ? cx : cy, WALL_UFO_DOOR_CLOSED);
+
+            build_ufo_upper_deck(cx - 2, cy - 2, cx + 2, cy + 2, door_side);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid - 1, mid - 2, OBJ_UFO_NAV);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid + 1, mid - 2, OBJ_UFO_NAV);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid - 2, mid - 2, OBJ_UFO_COMPUTER);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid + 2, mid - 2, OBJ_UFO_COMPUTER);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid,     mid - 1, OBJ_UFO_CORE);
+            place_ufo_prop_local_z(1, ux, uy, sz, door_side, mid + 1, mid + 1, OBJ_UFO_GRAVLIFT);
         }
     } else {
-
         /* 5x5 Scout Saucer: Forward Navigation Alcove + Central Reactor + Cryo/Pod Bays + Grav-Lift */
         place_ufo_prop_local(ux, uy, sz, door_side, 1, 0, OBJ_UFO_NAV);
         place_ufo_prop_local(ux, uy, sz, door_side, 3, 0, OBJ_UFO_COMPUTER);
@@ -570,7 +636,7 @@ static void place_procedural_ufo(void) {
     /* Crash-landed saucers get scorched battle-damaged hull plates + a smoking flank hull breach! */
     if (crashed) {
         int br_rx = (rand() & 1) ? 0 : (sz - 1);
-        int br_ry = (sz == 7) ? 4 : 3;
+        int br_ry = (sz >= 7) ? (sz - 3) : 3;
         int bx, by, b_side, b_pos;
         uint8_t b_smoke = (uint8_t)(3 + (rand() % 3));
         uint8_t b_fire  = (uint8_t)(2 + (rand() & 1));
@@ -1387,9 +1453,9 @@ static void gen_biome_steel(void) {
  * 3D BFS REACHABILITY SELF-HEALING & TACTICAL UNIT DEPLOYMENT
  * ========================================================================= */
 static void compute_reachability(int start_x, int start_y) {
-    static int16_t qx[MAP_LEVS * MAP_H * MAP_W];
-    static int16_t qy[MAP_LEVS * MAP_H * MAP_W];
-    static int8_t  qz[MAP_LEVS * MAP_H * MAP_W];
+    static int16_t qx[MAP_LEVS * MAX_MAP_H * MAX_MAP_W];
+    static int16_t qy[MAP_LEVS * MAX_MAP_H * MAX_MAP_W];
+    static int8_t  qz[MAP_LEVS * MAX_MAP_H * MAX_MAP_W];
     static const int dx_tab[10] = { 0,  1,  1,  1,  0, -1, -1, -1,  0,  0 };
     static const int dy_tab[10] = {-1, -1,  0,  1,  1,  1,  0, -1,  0,  0 };
     static const int dz_tab[10] = { 0,  0,  0,  0,  0,  0,  0,  0,  1, -1 };
@@ -1496,8 +1562,9 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
         for (z = 0; z < MAP_LEVS && uz < 0; z++) {
             for (y = 0; y < MAP_H && uz < 0; y++) {
                 for (x = 0; x < MAP_W; x++) {
-                    if (g_map[z][y][x].floor_id == FLOOR_NONE) continue;
-                    if (z == 1 && (zone_map[y][x] == ZONE_LZ || g_map[z][y][x].floor_id == FLOOR_ARV_ROOF)) continue;
+                    uint8_t fid = g_map[z][y][x].floor_id;
+                    if (fid == FLOOR_NONE) continue;
+                    if (z == 1 && (zone_map[y][x] == ZONE_LZ || fid == FLOOR_ARV_ROOF || fid == FLOOR_ARV_DRONE_PAD)) continue;
                     if (is_blocking_prop(g_map[z][y][x].obj_id)) continue;
                     if (!reach_mask[z][y][x]) {
                         uz = z; ux = x; uy = y;
@@ -1509,8 +1576,8 @@ static void ensure_all_floors_reachable(int lz_cx, int lz_cy) {
         if (uz < 0) break; /* 100% of walkable floor tiles across ALL levels are reachable! */
 
         {
-            static uint8_t in_comp[MAP_H][MAP_W];
-            static int16_t cx_q[MAP_W * MAP_H], cy_q[MAP_W * MAP_H];
+            static uint8_t in_comp[MAX_MAP_H][MAX_MAP_W];
+            static int16_t cx_q[MAX_MAP_W * MAX_MAP_H], cy_q[MAX_MAP_W * MAX_MAP_H];
             int qh = 0, qt = 0, repaired = 0, k, d;
 
             memset(in_comp, 0, sizeof(in_comp));
@@ -1649,14 +1716,14 @@ static int tile_free_for_spawn(int x, int y, int z, const ProcSpawnPlan *plan, i
     uint8_t fid;
     if ((unsigned)x >= MAP_W || (unsigned)y >= MAP_H || (unsigned)z >= MAP_LEVS) return 0;
     fid = g_map[z][y][x].floor_id;
-    if (fid == FLOOR_NONE || fid == FLOOR_ARV_ROOF) return 0;
+    if (fid == FLOOR_NONE || fid == FLOOR_ARV_ROOF || fid == FLOOR_ARV_DRONE_PAD) return 0;
     if (z > 0 && zone_map[y][x] == ZONE_LZ) return 0;
     if (fid >= FLOOR_UFO_ROOF_N && fid <= FLOOR_UFO_ROOF_W) return 0;
     if (g_map[z][y][x].obj_id != OBJ_NONE && g_map[z][y][x].obj_id != OBJ_RUBBLE) return 0;
     if (z > 0 && isomap_is_lift_obj(g_map[z - 1][y][x].obj_id)) return 0;
     if (!reach_mask[z][y][x]) return 0;
 
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < 8; i++) {
         if (z == 0 && plan->squad_x[i] == x && plan->squad_y[i] == y) return 0;
     }
     for (i = 0; i < placed_aliens; i++) {
@@ -1667,7 +1734,7 @@ static int tile_free_for_spawn(int x, int y, int z, const ProcSpawnPlan *plan, i
 
 static int min_squad_dist(int x, int y, const ProcSpawnPlan *plan) {
     int i, best = 999;
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < 8; i++) {
         int d = abs(x - plan->squad_x[i]) + abs(y - plan->squad_y[i]);
         if (d < best) best = d;
     }
@@ -1685,7 +1752,7 @@ static int min_other_alien_dist(int x, int y, const ProcSpawnPlan *plan, int pla
 
 static int any_squad_has_los(int x, int y, int z, const ProcSpawnPlan *plan) {
     int i;
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < 8; i++) {
         int d = abs(x - plan->squad_x[i]) + abs(y - plan->squad_y[i]);
         if (d <= 18 && isomap_has_los(plan->squad_x[i], plan->squad_y[i], 0, x, y, z)) {
             return 1;
@@ -1756,6 +1823,8 @@ static void place_armored_response_vehicle(void) {
             g_map[0][y][g_lz_x0].wall_west     = WALL_ARV_HULL;
             g_map[0][y][g_lz_x1 + 1].wall_west = WALL_ARV_FRONT;
         }
+        /* Front Roof Drone Landing Pad on z=1 */
+        g_map[1][g_lz_y0 + 1][g_lz_x1 - 1].floor_id = FLOOR_ARV_DRONE_PAD;
     } else {
         /* 3x5 Vertical ARV (Rear at North y0, Front Cab/Grille at South y1+1) */
         for (i = 0; i < 5; i++) {
@@ -1771,6 +1840,8 @@ static void place_armored_response_vehicle(void) {
             g_map[0][g_lz_y0][x].wall_north     = WALL_ARV_HULL;
             g_map[0][g_lz_y1 + 1][x].wall_north = WALL_ARV_FRONT;
         }
+        /* Front Roof Drone Landing Pad on z=1 */
+        g_map[1][g_lz_y1 - 1][g_lz_x0 + 1].floor_id = FLOOR_ARV_DRONE_PAD;
     }
 }
 
@@ -1842,17 +1913,16 @@ static void gen_biome_base_defense(void) {
                     if (y != my) g_map[0][y][bx0].wall_west = WALL_FENCE;
                 }
                 place_prop_if_clear(mx, my, 0,
-
                                     (fid == FAC_RADAR) ? OBJ_UFO_NAV :
                                     (fid == FAC_OFFENSE_SYS ? OBJ_UFO_CORE : OBJ_UFO_POD));
                 continue;
-            } else if (fid == FAC_LAB || fid == FAC_UPG_LAB || fid == FAC_CONTAINMENT) {
+            } else if (fid == FAC_LAB || fid == FAC_UPG_LAB || fid == FAC_CONTAINMENT || fid == FAC_PSI_LAB) {
                 build_structure(bx0, by0, bx1, by1, 1,
-                                (fid == FAC_CONTAINMENT) ? FLOOR_UFO_DECK : FLOOR_DINER_TILE,
+                                (fid == FAC_CONTAINMENT || fid == FAC_PSI_LAB) ? FLOOR_UFO_DECK : FLOOR_DINER_TILE,
                                 FLOOR_ROOF_TAR,
                                 WALL_STEEL, WALL_DINER_GLASS, 35, 1);
                 place_prop_if_clear(bx0 + 1, by0 + 1, 0, OBJ_UFO_COMPUTER);
-                place_prop_if_clear(bx1 - 1, by0 + 1, 0, OBJ_UFO_CRYO);
+                place_prop_if_clear(bx1 - 1, by0 + 1, 0, (fid == FAC_PSI_LAB) ? OBJ_UFO_NAV : OBJ_UFO_CRYO);
             } else {
                 /* FAC_STORES or FAC_UPG_WORKSHOP */
                 build_structure(bx0, by0, bx1, by1, 1,
@@ -1875,109 +1945,199 @@ static void gen_biome_base_defense(void) {
     }
 }
 
+/* Add extra structures, corn patches, and cover on 48x48 (2x area) Large/Command Ship battlefields! */
+static void scatter_extra_large_map_cover(int biome_id) {
+    int i, bx, by;
+    if (MAP_W <= NORM_MAP_W) return;
+
+    for (i = 0; i < 4; i++) {
+        int w = rrange(5, 7), h = rrange(5, 7);
+        if (find_random_lot(w, h, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+            int st = (i == 0 || (rand() & 1)) ? 2 : 1;
+            uint8_t fl0 = (biome_id == BIOME_STEEL) ? FLOOR_SIDEWALK : FLOOR_WOOD;
+            uint8_t wl  = (biome_id == BIOME_PA_FARM) ? WALL_BARN_WOOD :
+                          (biome_id == BIOME_STEEL)   ? WALL_STEEL     : WALL_BRICK;
+            BldgRect b = build_structure(bx, by, bx + w - 1, by + h - 1, st,
+                                         fl0, FLOOR_WOOD, wl, WALL_BRICK_WIN, 40, 1);
+            int mx = (b.x0 + b.x1) / 2, my = (b.y0 + b.y1) / 2;
+            carve_rect_door(b.x0, b.y0, b.x1, b.y1, 0, mx, WALL_DOOR_CLOSED);
+            carve_rect_door(b.x0, b.y0, b.x1, b.y1, 2, mx, WALL_DOOR_CLOSED);
+            carve_rect_door(b.x0, b.y0, b.x1, b.y1, 1, my, WALL_DOOR_OPEN);
+            place_stairs_safe(b.x0, b.y0);
+            if (st >= 2) place_stairs_at(1, b.x1, b.y1);
+            place_prop_if_clear(b.x1 - 1, b.y0 + 1, 0, OBJ_CRATE);
+            place_prop_if_clear(b.x0 + 1, b.y1 - 1, 0, OBJ_BARREL);
+        }
+    }
+    for (i = 0; i < 3; i++) {
+        int cw = rrange(5, 7), ch = rrange(5, 7);
+        if (find_random_lot(cw, ch, 2, LOT_MAX_X, 2, LOT_MAX_Y, 0, &bx, &by)) {
+            place_corn_patch(bx, by, bx + cw - 1, by + ch - 1);
+        }
+    }
+}
+
+static int calc_squad_power_score(void) {
+    int i, p = 0;
+    for (i = 0; i < MAX_ROSTER_SIZE; i++) {
+        const Operative *op = &g_camp.squad[i];
+        if (!op->active || !op->assigned_arv) continue;
+        if (op->rank >= 2) p += op->rank;
+        if (op->weapon_id >= ITEM_LASER_PISTOL) p += 2;
+    }
+    if (g_camp.tech_done[TECH_LASER_WEAPONS])  p += 2;
+    if (g_camp.tech_done[TECH_PLASMA_WEAPONS]) p += 4;
+    p += g_camp.missions_won / 2;
+    return p;
+}
+
 static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
     int cx = (g_lz_x0 + g_lz_x1) / 2;
     int cy = (g_lz_y0 + g_lz_y1) / 2;
-    int ufo_class = (g_ufo_sz == 7) ? 1 : 0;
+    int ufo_class = g_battle.ufo_class;
     int a_count;
     int a;
+    int allow_floater = (g_camp.valley_day >= 4 || g_camp.missions_won >= 2 || ufo_class >= 1);
+    int allow_muton   = (g_camp.valley_day >= 8 || g_camp.missions_won >= 5 || ufo_class >= 2);
+    int allow_cryptid = (calc_squad_power_score() >= 10 || g_camp.missions_won >= 6 || ufo_class >= 3);
+    int cryptid_count = 0;
 
     if (biome_id != BIOME_BASE_DEFENSE) {
         place_armored_response_vehicle();
     }
-
 
     if (g_camp.launched_event >= 0 && g_camp.launched_event < MAX_RADAR_EVENTS &&
         g_camp.events[g_camp.launched_event].active) {
         ufo_class = g_camp.events[g_camp.launched_event].ufo_size;
     }
 
-    /* Larger UFOs carry more aliens (Small Scout: 4..5, Medium Cruiser: 6..7, Large Ship: 8) */
-    if (ufo_class == 0)      a_count = 4 + (rand() & 1);
-    else if (ufo_class == 1) a_count = 6 + (rand() & 1);
-    else                     a_count = 8;
+    /* Larger UFOs carry more aliens (Scout: 5..6, Harvester: 7..8, Abductor: 10..11, Command: 12..14) */
+    if (ufo_class == 0)      a_count = 5 + (rand() & 1);
+    else if (ufo_class == 1) a_count = 7 + (rand() & 1);
+    else if (ufo_class == 2) a_count = 10 + (rand() & 1);
+    else                     a_count = 12 + (rand() % 3);
+    if (a_count > 16) a_count = 16;
 
     memset(plan, 0, sizeof(*plan));
     plan->squad_dir = (g_lz_side == 0) ? 0 : (g_lz_side == 1) ? 4 : (g_lz_side == 2) ? 2 : 6;
     plan->bus_x0 = g_lz_x0; plan->bus_y0 = g_lz_y0;
     plan->bus_x1 = g_lz_x1; plan->bus_y1 = g_lz_y1;
 
-
-    /* 5-Agent DUFF-COM Skyranger Landing Wedge inside ZONE_LZ */
+    /* 8-Operative DUFF-COM ARV Bus Seating + Rear Turret & Front Drone Pad coordinates */
     if (g_lz_side == 0 || g_lz_side == 1) {
         int front_y = (g_lz_side == 0) ? g_lz_y0 : g_lz_y1;
-        int back_y  = (g_lz_side == 0) ? (g_lz_y0 + 1) : (g_lz_y1 - 1);
+        int mid_y   = g_lz_y0 + 1;
+        int back_y  = (g_lz_side == 0) ? g_lz_y1 : g_lz_y0;
+        plan->bus_turret_tx   = g_lz_x0 + 1;
+        plan->bus_turret_ty   = mid_y;
+        plan->bus_drone_pad_x = g_lz_x1 - 1;
+        plan->bus_drone_pad_y = mid_y;
+
         plan->squad_x[0] = cx;     plan->squad_y[0] = front_y;
-        plan->squad_x[1] = cx - 1; plan->squad_y[1] = back_y;
-        plan->squad_x[2] = cx + 1; plan->squad_y[2] = back_y;
-        plan->squad_x[3] = cx - 2; plan->squad_y[3] = back_y;
-        plan->squad_x[4] = cx + 2; plan->squad_y[4] = back_y;
+        plan->squad_x[1] = cx - 1; plan->squad_y[1] = mid_y;
+        plan->squad_x[2] = cx + 1; plan->squad_y[2] = mid_y;
+        plan->squad_x[3] = cx - 2; plan->squad_y[3] = mid_y;
+        plan->squad_x[4] = cx + 2; plan->squad_y[4] = mid_y;
+        plan->squad_x[5] = cx;     plan->squad_y[5] = back_y;
+        plan->squad_x[6] = cx - 1; plan->squad_y[6] = back_y;
+        plan->squad_x[7] = cx + 1; plan->squad_y[7] = back_y;
     } else {
         int front_x = (g_lz_side == 2) ? g_lz_x1 : g_lz_x0;
-        int back_x  = (g_lz_side == 2) ? (g_lz_x1 - 1) : (g_lz_x0 + 1);
+        int mid_x   = g_lz_x0 + 1;
+        int back_x  = (g_lz_side == 2) ? g_lz_x0 : g_lz_x1;
+        plan->bus_turret_tx   = mid_x;
+        plan->bus_turret_ty   = g_lz_y0 + 1;
+        plan->bus_drone_pad_x = mid_x;
+        plan->bus_drone_pad_y = g_lz_y1 - 1;
+
         plan->squad_x[0] = front_x; plan->squad_y[0] = cy;
-        plan->squad_x[1] = back_x;  plan->squad_y[1] = cy - 1;
-        plan->squad_x[2] = back_x;  plan->squad_y[2] = cy + 1;
-        plan->squad_x[3] = back_x;  plan->squad_y[3] = cy - 2;
-        plan->squad_x[4] = back_x;  plan->squad_y[4] = cy + 2;
+        plan->squad_x[1] = mid_x;   plan->squad_y[1] = cy - 1;
+        plan->squad_x[2] = mid_x;   plan->squad_y[2] = cy + 1;
+        plan->squad_x[3] = mid_x;   plan->squad_y[3] = cy - 2;
+        plan->squad_x[4] = mid_x;   plan->squad_y[4] = cy + 2;
+        plan->squad_x[5] = back_x;  plan->squad_y[5] = cy;
+        plan->squad_x[6] = back_x;  plan->squad_y[6] = cy - 1;
+        plan->squad_x[7] = back_x;  plan->squad_y[7] = cy + 1;
     }
 
     ensure_all_floors_reachable(plan->squad_x[0], plan->squad_y[0]);
 
     plan->num_aliens = a_count;
     for (a = 0; a < a_count; a++) {
-        int utype, found = 0, tries;
+        int utype = 1, arank = 0, found = 0, tries;
         int ax = MAP_W / 2, ay = MAP_H / 2, az = 0;
 
-        /* Role-based + Biome-weighted randomized alien species */
-        if (a == 0) {
-            utype = (biome_id == BIOME_STEEL || (rand() & 1)) ? 3 : 1; /* UFO Commander: Muton or Sectoid */
-            plan->alien_name[a] = (utype == 3) ? "MUTON COMMANDER" : "SECTOID LEADER";
-        } else if (a == 1) {
-            utype = 2; /* Rooftop / Hayloft / Catwalk Floater Sniper */
+        /* Progressive Alien Races + Sectoid Ranks + Exclusive Sectoid Commander in Command Ships! */
+        if (a == 0 && ufo_class == 3) {
+            /* Sectoid Commander ONLY spawns in Command Ships (ufo_class == 3)! */
+            utype = 1;
+            arank = 3;
+            plan->alien_name[a] = "SECTOID COMMANDER";
+        } else if (allow_cryptid && cryptid_count < 2 &&
+                   (a == a_count - 1 || (a == a_count - 2 && (rand() % 100) < 55))) {
+            /* Specialty Bio-Weapon Unit: At most 2 Cryptids per mission when squad is overpowered! */
+            utype = 5;
+            arank = 2;
+            cryptid_count++;
+            plan->alien_name[a] = "CRYPTID BIO-TERROR";
+        } else if (a == 0) {
+            if (allow_muton && (ufo_class >= 2 || (rand() & 1))) {
+                utype = 3; arank = 2;
+                plan->alien_name[a] = "MUTON COMMANDER";
+            } else {
+                utype = 1; arank = 2;
+                plan->alien_name[a] = "SECTOID LEADER";
+            }
+        } else if (a == 1 && allow_floater) {
+            utype = 2; arank = 1;
             plan->alien_name[a] = "FLOATER SNIPER";
-        } else if (a == 2 || a == 3) {
-            utype = (rand() % 100 < 55) ? 1 : 3; /* Building / Cornfield Lurker */
-            plan->alien_name[a] = (utype == 3) ? "MUTON ENFORCER" : "SECTOID STALKER";
-        } else if (a == 4 && g_ufo_sz == 7) {
-            utype = (rand() % 100 < 45) ? 1 : (rand() & 1 ? 2 : 3); /* Cruiser Reactor/Stasis Crew */
-            plan->alien_name[a] = (utype == 1) ? "SECTOID NAVIGATOR" :
-                                  (utype == 2) ? "FLOATER TECH" : "MUTON GUARD";
         } else {
             int r = rand() % 100;
-            utype = (r < 45) ? 1 : (r < 78) ? 2 : 3;
-            plan->alien_name[a] = (utype == 1) ? "SECTOID SCOUT" :
-                                  (utype == 2) ? "FLOATER PATROL" : "MUTON WARRIOR";
+            if (allow_muton && r >= 62) {
+                utype = 3;
+                arank = (r >= 85) ? 1 : 0;
+                plan->alien_name[a] = arank ? "MUTON ENFORCER" : "MUTON WARRIOR";
+            } else if (allow_floater && r >= 35) {
+                utype = 2;
+                arank = (r >= 52) ? 1 : 0;
+                plan->alien_name[a] = arank ? "FLOATER TECH" : "FLOATER PATROL";
+            } else {
+                utype = 1;
+                arank = (r >= 22) ? 1 : 0;
+                plan->alien_name[a] = (arank == 1) ? "SECTOID WARRIOR" : "SECTOID SCOUT";
+            }
         }
 
-        /* Role 0: Guarding UFO Navigation Area / Bridge */
+        /* Role 0: Guarding UFO Upper Command Bridge (if multi-level) or Lower Bridge */
         if (a == 0 && g_ufo_rect.valid) {
-            for (tries = 0; tries < 40 && !found; tries++) {
-                int rx = rrange(1, g_ufo_sz - 2);
-                int ry = rrange(0, 1);
-                int tx, ty;
-                ufo_rot_xy(g_ufo_rect.x0, g_ufo_rect.y0, g_ufo_sz, g_ufo_door_side, rx, ry, &tx, &ty);
-                if (tile_free_for_spawn(tx, ty, 0, plan, a)) {
-                    ax = tx; ay = ty; az = 0; found = 1;
+            int pref_z = (ufo_class >= 1) ? 1 : 0;
+            int u_cx = (g_ufo_rect.x0 + g_ufo_rect.x1) / 2;
+            int u_cy = (g_ufo_rect.y0 + g_ufo_rect.y1) / 2;
+            if (pref_z == 1) {
+                for (tries = 0; tries < 40 && !found; tries++) {
+                    int tx = rrange(u_cx - 1, u_cx + 1);
+                    int ty = rrange(u_cy - 1, u_cy + 1);
+                    if (tile_free_for_spawn(tx, ty, 1, plan, a)) {
+                        ax = tx; ay = ty; az = 1; found = 1;
+                    }
                 }
             }
             for (tries = 0; tries < 50 && !found; tries++) {
-                int tx = rrange(g_ufo_rect.x0, g_ufo_rect.x1);
-                int ty = rrange(g_ufo_rect.y0, g_ufo_rect.y1);
+                int tx = rrange(g_ufo_rect.x0 + 1, g_ufo_rect.x1 - 1);
+                int ty = rrange(g_ufo_rect.y0 + 1, g_ufo_rect.y1 - 1);
                 if (tile_free_for_spawn(tx, ty, 0, plan, a)) {
                     ax = tx; ay = ty; az = 0; found = 1;
                 }
             }
         }
-        /* Role 4 on 7x7 Cruiser: Guarding UFO Main Reactor & Stasis Deck */
-        else if (a == 4 && g_ufo_sz == 7 && g_ufo_rect.valid) {
+        /* Role 4 / 5 on Multi-Room UFOs: Guarding UFO Main Reactor & Upper Deck */
+        else if ((a == 4 || a == 5) && g_ufo_sz >= 7 && g_ufo_rect.valid) {
+            int tz = (a == 5 && ufo_class >= 2) ? 1 : 0;
             for (tries = 0; tries < 50 && !found; tries++) {
-                int rx = rrange(1, g_ufo_sz - 2);
-                int ry = rrange(2, g_ufo_sz - 2);
-                int tx, ty;
-                ufo_rot_xy(g_ufo_rect.x0, g_ufo_rect.y0, g_ufo_sz, g_ufo_door_side, rx, ry, &tx, &ty);
-                if (tile_free_for_spawn(tx, ty, 0, plan, a) && !any_squad_has_los(tx, ty, 0, plan)) {
-                    ax = tx; ay = ty; az = 0; found = 1;
+                int tx = rrange(g_ufo_rect.x0 + 1, g_ufo_rect.x1 - 1);
+                int ty = rrange(g_ufo_rect.y0 + 1, g_ufo_rect.y1 - 1);
+                if (tile_free_for_spawn(tx, ty, tz, plan, a) && !any_squad_has_los(tx, ty, tz, plan)) {
+                    ax = tx; ay = ty; az = tz; found = 1;
                 }
             }
         }
@@ -2012,7 +2172,7 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
             if (zone_map[ty][tx] == ZONE_LZ) continue;
             if (!tile_free_for_spawn(tx, ty, 0, plan, a)) continue;
             if (min_squad_dist(tx, ty, plan) < (tries < 130 ? 16 : 10)) continue;
-            if (tries < 120 && min_other_alien_dist(tx, ty, plan, a) < 6) continue;
+            if (tries < 120 && min_other_alien_dist(tx, ty, plan, a) < 5) continue;
             if (tries < 160 && any_squad_has_los(tx, ty, 0, plan)) continue;
             ax = tx; ay = ty; az = 0; found = 1;
         }
@@ -2033,13 +2193,14 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
         }
 
         plan->alien_type[a] = utype;
+        plan->alien_rank[a] = arank;
         plan->alien_x[a]    = ax;
         plan->alien_y[a]    = ay;
         plan->alien_z[a]    = az;
         plan->alien_dir[a]  = calc_dir_vec((MAP_W / 2) - ax, (MAP_H / 2) - ay);
     }
 
-    /* Spawn a random number of Coopersburg Civilians (3..6 in town/rural/steel, 2..4 in Base Defense) */
+    /* Spawn a random number of Coopersburg Civilians (3..6 in normal maps, 5..8 in 48x48 maps) */
     {
         static const char *civ_male_names[8] = {
             "CIV. MILLER", "CIV. SCHULTZ", "CIV. YODER", "CIV. KLINE",
@@ -2055,9 +2216,10 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
         static const char *base_fem_names[4] = {
             "DR. VANCE", "MEDIC HELLER", "ANALYST BACH", "TECH WAGNER"
         };
-        int c_count = (biome_id == BIOME_BASE_DEFENSE) ? (2 + (rand() % 3)) : (3 + (rand() % 4));
+        int c_count = (biome_id == BIOME_BASE_DEFENSE) ? (2 + (rand() % 3)) :
+                      (MAP_W > NORM_MAP_W) ? (5 + (rand() % 4)) : (3 + (rand() % 4));
         int c;
-        if (c_count > 6) c_count = 6;
+        if (c_count > 8) c_count = 8;
         plan->num_civilians = c_count;
 
         for (c = 0; c < c_count; c++) {
@@ -2117,12 +2279,19 @@ static void populate_spawn_plan(int biome_id, ProcSpawnPlan *plan) {
 
 void procgen_build_battlefield(int biome_id, ProcSpawnPlan *out_plan) {
     int b = biome_id % BIOME_COUNT;
+    if (g_battle.map_w <= 0 || g_battle.map_h <= 0) {
+        g_battle.map_w = (b != BIOME_BASE_DEFENSE && g_battle.ufo_class >= 2) ? MAX_MAP_W : NORM_MAP_W;
+        g_battle.map_h = g_battle.map_w;
+    }
     if (b == BIOME_RTE309)            gen_biome_rte309();
     else if (b == BIOME_PA_FARM)      gen_biome_pa_farm();
     else if (b == BIOME_SUBURB)       gen_biome_suburb();
     else if (b == BIOME_BASE_DEFENSE) gen_biome_base_defense();
     else                              gen_biome_steel();
 
+    if (b != BIOME_BASE_DEFENSE) {
+        scatter_extra_large_map_cover(b);
+    }
 
     if (out_plan) {
         populate_spawn_plan(b, out_plan);
