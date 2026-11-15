@@ -37,8 +37,14 @@ compile_flags.txt
 /tools/*
 !/tools/gen_sfx.ps1
 !/tools/gen_sprites.ps1
+!/tools/gen_new_assets.ps1
+!/tools/gen_saves.ps1
 !/tools/portraits_male_src.jpg
 !/tools/portraits_female_src.jpg
+
+# Campaign save game files
+*.SAV
+*.sav
 
 # Runtime screenshots & DOSBox-X logs / captures
 /SNAP.BMP

@@ -19,6 +19,7 @@ uint8_t spr_muzzle[PROJ_TYPE_COUNT][FX_W * FX_H];
 uint8_t spr_reticle[2][FX_W * FX_H];
 uint8_t spr_splash[SPLASH_TYPE_COUNT][4][FX_W * FX_H];
 uint8_t spr_portraits[NUM_PORTRAITS][32 * 36];
+uint8_t spr_drone_portraits[2][32 * 36];
 uint8_t spr_fullbody[NUM_PORTRAITS][FULLBODY_W * FULLBODY_H];
 uint8_t spr_weapons[4][40 * 24];
 uint8_t spr_arv_turret[2][8][UNIT_W * UNIT_H];
@@ -1650,6 +1651,121 @@ static void build_hud_sprites(void) {
         }
     }
 
+    /* Drone Portraits (2 x 32x36: 0=Quad-Copter Recon Drone, 1=UFO Alloy Plasma Drone) */
+    for (p = 0; p < 2; p++) {
+        uint8_t *dp = spr_drone_portraits[p];
+        for (y = 0; y < 36; y++) {
+            for (x = 0; x < 32; x++) {
+                uint8_t bg = (uint8_t)((y & 1) ? 77 : 78);
+                if ((x % 8 == 0) || (y % 8 == 0)) bg = 75;
+                dp[y * 32 + x] = bg;
+            }
+        }
+        if (p == 0) {
+            /* 0: ARV Quad-Copter Recon Drone w/ 4 Spinning Rotors, Optical Sensor & Assault Rifle */
+            int s;
+            /* Diagonal carbon-fiber rotor arms */
+            for (s = 0; s < 10; s++) {
+                dp[(8  + s / 2) * 32 + (5  + s)] = 9;
+                dp[(8  + s / 2) * 32 + (26 - s)] = 9;
+                dp[(18 - s / 2) * 32 + (4  + s)] = 10;
+                dp[(18 - s / 2) * 32 + (27 - s)] = 10;
+            }
+            /* 4 Spinning Rotor Blades + Motor Pods + Cyan Strobe Tips */
+            for (x = 2; x <= 11; x++) {
+                dp[6 * 32 + x] = (x & 1) ? 80 : 3;
+                dp[7 * 32 + (31 - x)] = (x & 1) ? 3 : 80;
+            }
+            for (x = 1; x <= 10; x++) {
+                dp[16 * 32 + x] = (x & 1) ? 81 : 4;
+                dp[16 * 32 + (31 - x)] = (x & 1) ? 4 : 81;
+            }
+            for (y = 7; y <= 9; y++) {
+                dp[y * 32 + 6] = 11; dp[y * 32 + 7] = 8;
+                dp[y * 32 + 24] = 8; dp[y * 32 + 25] = 11;
+            }
+            for (y = 17; y <= 19; y++) {
+                dp[y * 32 + 5] = 11; dp[y * 32 + 6] = 8;
+                dp[y * 32 + 25] = 8; dp[y * 32 + 26] = 11;
+            }
+            dp[6 * 32 + 2]  = 80; dp[7 * 32 + 29] = 80;
+            dp[16 * 32 + 1] = 33; dp[16 * 32 + 30] = 18;
+
+            /* Telemetry antenna mast */
+            for (y = 3; y <= 9; y++) dp[y * 32 + 16] = (y == 3) ? 96 : 6;
+            /* Central Olive-Drab Armored Drone Fuselage (x=9..22, y=10..21) */
+            for (y = 10; y <= 21; y++) {
+                int hw = (y <= 12 || y >= 20) ? 5 : 7;
+                for (x = 16 - hw; x <= 15 + hw; x++) {
+                    uint8_t fc = (y == 13) ? 97 : (y <= 12 ? 21 : (y <= 18 ? 23 : 25));
+                    if (x == 16 - hw || x == 15 + hw || y == 10 || y == 21) fc = 14;
+                    dp[y * 32 + x] = fc;
+                }
+            }
+            /* Front Optical Target Acquisition Lens (x=13..18, y=15..19) */
+            for (y = 15; y <= 19; y++) {
+                for (x = 13; x <= 18; x++) {
+                    dp[y * 32 + x] = (x == 13 || x == 18 || y == 15 || y == 19) ? 12 : 81;
+                }
+            }
+            dp[16 * 32 + 14] = 0; dp[16 * 32 + 15] = 80; dp[17 * 32 + 16] = 96;
+
+            /* Landing Skids & Underslung 5.56mm Assault Rifle Gimbal (y=22..31) */
+            for (y = 22; y <= 30; y++) {
+                dp[y * 32 + 9]  = 11; dp[y * 32 + 22] = 11;
+            }
+            for (x = 7; x <= 11; x++)  dp[30 * 32 + x] = 9;
+            for (x = 20; x <= 24; x++) dp[30 * 32 + x] = 9;
+            for (y = 22; y <= 26; y++) {
+                for (x = 12; x <= 19; x++) dp[y * 32 + x] = (y == 22) ? 10 : 7;
+            }
+            for (x = 4; x <= 20; x++) {
+                dp[25 * 32 + x] = (x <= 5) ? 96 : 5;
+                dp[26 * 32 + x] = (x <= 5) ? 98 : 8;
+            }
+            for (y = 26; y <= 30; y++) {
+                for (x = 15; x <= 18; x++) dp[y * 32 + x] = 24; /* Box Magazine */
+            }
+        } else {
+            /* 1: ARV Alloy UFO Hover-Drone w/ Glowing Elerium Rim & Plasma Emitter */
+            /* Upper Glowing Cyan/Elerium Sensor Dome (x=10..21, y=6..11) */
+            for (y = 6; y <= 11; y++) {
+                int hw = (y <= 7) ? 3 : (y <= 9 ? 5 : 6);
+                for (x = 16 - hw; x <= 15 + hw; x++) {
+                    dp[y * 32 + x] = (x == 16 - hw || x == 15 + hw || y == 6) ? 14 :
+                                     (y <= 8 && x >= 13 && x <= 16) ? 80 : 66;
+                }
+            }
+            dp[7 * 32 + 14] = 0; dp[7 * 32 + 15] = 80;
+            /* Curved Alien Alloy Saucer Disc (x=2..29, y=11..21) */
+            for (y = 11; y <= 21; y++) {
+                int hw = (y == 15 || y == 16) ? 14 : ((y == 14 || y == 17) ? 12 : ((y == 13 || y == 18) ? 10 : 7));
+                for (x = 16 - hw; x <= 15 + hw; x++) {
+                    uint8_t sc;
+                    if (x == 16 - hw || x == 15 + hw || y == 21) sc = 14;
+                    else if (y == 15 || y == 16) sc = ((x + y) & 1) ? 144 : 80; /* Glowing Elerium/Cyan Rim */
+                    else if (y < 15) sc = ((x % 5) == 0) ? 133 : 162;
+                    else sc = 134;
+                    dp[y * 32 + x] = sc;
+                }
+            }
+            /* Underslung Heavy Plasma Emitter & Glowing Green Orb (y=21..29) */
+            for (y = 21; y <= 26; y++) {
+                for (x = 11; x <= 20; x++) {
+                    dp[y * 32 + x] = (x == 11 || x == 20) ? 14 : (y == 23 ? 144 : 132);
+                }
+            }
+            for (x = 5; x <= 15; x++) {
+                dp[25 * 32 + x] = (x <= 7) ? 144 : 163;
+                dp[26 * 32 + x] = (x <= 7) ? 0   : 131;
+                dp[27 * 32 + x] = (x <= 7) ? 18  : 14;
+            }
+            /* Anti-gravity thruster rings below saucer (y=30..34) */
+            for (x = 10; x <= 21; x++) if ((x & 1) == 0) dp[30 * 32 + x] = 80;
+            for (x = 12; x <= 19; x++) if ((x & 1) != 0) dp[32 * 32 + x] = 144;
+        }
+    }
+
     /* Full-Body Paper-Doll Operative Sprites (12 x 48x96: 0..5 Male, 6..11 Female) */
     for (p = 0; p < NUM_PORTRAITS; p++) {
         int is_fem = (p >= 6);
@@ -1929,11 +2045,14 @@ static void load_bmp_overrides(void) {
         free(sheet);
     }
 
-    /* 5. PORTRAIT.BMP (12 portraits x 32x36: 0..5 Male, 6..11 Female) */
+    /* 5. PORTRAIT.BMP (12 soldier portraits + 2 drone portraits x 32x36) */
     sheet = bmp_load_alloc("PORTRAIT.BMP", &sw, &sh);
     if (sheet) {
         for (i = 0; i < NUM_PORTRAITS && (i + 1) * 32 <= sw; i++) {
             bmp_extract_tile(sheet, sw, sh, i * 32, 0, 32, 36, spr_portraits[i]);
+        }
+        for (i = 0; i < 2 && (NUM_PORTRAITS + i + 1) * 32 <= sw; i++) {
+            bmp_extract_tile(sheet, sw, sh, (NUM_PORTRAITS + i) * 32, 0, 32, 36, spr_drone_portraits[i]);
         }
         free(sheet);
     }

@@ -413,10 +413,64 @@ public class DuffSfxGen {
             }
             SaveWav16(Path.Combine(dir, "ALERT.WAV"), b);
         }
+
+        // 17. DRONQUAD.WAV - Quad-Copter brushless electric motor hum & 4-rotor blade chop
+        {
+            int n = (int)(SR * 0.19);
+            double[] b = new double[n];
+            double ph1 = 0, ph2 = 0, bp = 0, lp = 0;
+            for (int i = 0; i < n; i++) {
+                double t = (double)i / SR;
+                double u = (double)i / n;
+                double env = Math.Sin(Math.PI * Math.Pow(u, 0.75)) * 0.92;
+                // Slight RPM surge across the tile step + 38 Hz quad-blade chop
+                double rpm = 188.0 + 42.0 * Math.Sin(Math.PI * u) + 6.0 * Math.Sin(2 * Math.PI * 19.0 * t);
+                double f2  = rpm * 2.015; // Detuned pair of counter-rotating motors
+                double chop = 0.62 + 0.38 * Math.Sin(2 * Math.PI * 38.0 * t);
+                ph1 += 2 * Math.PI * rpm / SR;
+                ph2 += 2 * Math.PI * f2  / SR;
+
+                double w = White();
+                lp += 0.36 * (w - lp);
+                bp += 0.24 * ((w - lp) - bp);
+
+                double motor = (Math.Sin(ph1) * 0.46 + Math.Sin(ph1 * 2.0) * 0.28 + Math.Sin(ph1 * 4.0) * 0.15
+                              + Math.Sin(ph2) * 0.38 + Math.Sin(ph2 * 3.0) * 0.18) * chop;
+                double wash  = bp * (0.42 + 0.28 * Math.Sin(2 * Math.PI * 38.0 * t));
+                b[i] = (motor * 0.72 + wash * 0.55) * env;
+            }
+            SaveWav16(Path.Combine(dir, "DRONQUAD.WAV"), b);
+        }
+
+        // 18. DRONUFO.WAV - UFO Alloy Drone alien Elerium anti-gravity thruster hum & pulse
+        {
+            int n = (int)(SR * 0.21);
+            double[] b = new double[n];
+            double phC = 0, phM = 0, phH = 0, lp = 0;
+            for (int i = 0; i < n; i++) {
+                double t = (double)i / SR;
+                double u = (double)i / n;
+                double env = Math.Sin(Math.PI * Math.Pow(u, 0.78)) * 0.92;
+                // Deep alien grav-drive carrier + 28 Hz phase shimmer + crystalline Elerium overtone
+                double fc = 122.0 + 54.0 * Math.Sin(Math.PI * u) + 18.0 * Math.Sin(2 * Math.PI * 28.0 * t);
+                double fm = fc * 2.0 + 12.0 * Math.Cos(2 * Math.PI * 14.0 * t);
+                double fh = 640.0 + 140.0 * Math.Sin(Math.PI * u);
+                phC += 2 * Math.PI * fc / SR;
+                phM += 2 * Math.PI * fm / SR;
+                phH += 2 * Math.PI * fh / SR;
+                lp  += 0.18 * (White() - lp);
+
+                double grav = Math.Sin(phC + 1.35 * Math.Sin(phM)) * 0.68
+                            + Math.Sin(phH) * 0.22 * (0.6 + 0.4 * Math.Sin(2 * Math.PI * 28.0 * t))
+                            + lp * 0.22;
+                b[i] = grav * env;
+            }
+            SaveWav16(Path.Combine(dir, "DRONUFO.WAV"), b);
+        }
     }
 }
 "@
 
 Add-Type -TypeDefinition $csharp
 [DuffSfxGen]::GenerateAll((Join-Path $PSScriptRoot "..\assets"))
-Write-Host "Generated 16 tactical WAV sound effects in assets/!"
+Write-Host "Generated 18 tactical WAV sound effects in assets/!"

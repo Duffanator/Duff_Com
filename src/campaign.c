@@ -1528,19 +1528,484 @@ int campaign_load_game(const char *filename) {
         } else {
             update_event_nearest_site(ev);
             if (ev->is_flying) {
-                ev->type_title = (ev->ufo_size == 0) ? "SCOUT UFO" :
-                                 (ev->ufo_size == 1) ? "HARVESTER UFO" :
-                                 (ev->ufo_size == 2) ? "ABDUCTOR SHIP" : "COMMAND DREADNOUGHT";
+                ev->type_title = (ev->ufo_size == 0) ? "FLYING SCOUT" :
+                                 (ev->ufo_size == 1) ? "FLYING HARVESTER" :
+                                 (ev->ufo_size == 2) ? "FLYING ABDUCTOR" : "COMMAND DREADNOUGHT";
                 ev->intel_desc = "AIRBORNE UFO TRACKED OVER VALLEY";
+            } else if (ev->severity == 2) {
+                ev->type_title = "TERROR RAID";
+                ev->intel_desc = "ALIEN TERROR RAID IN PROGRESS!";
+            } else if (ev->severity == 0) {
+                ev->type_title = (ev->ufo_size == 0) ? "CRASHED SCOUT" :
+                                 (ev->ufo_size == 1) ? "CRASHED HARVESTER" :
+                                 (ev->ufo_size == 2) ? "CRASHED ABDUCTOR" : "CRASHED DREADNOUGHT";
+                ev->intel_desc = "SHOT DOWN BY DUFF-COM - SECURE SITE!";
             } else {
-                ev->type_title = (ev->severity == 0) ? "CRASHED UFO" : "LANDED UFO";
-                ev->intel_desc = "ALIEN CONTACT IN LEHIGH VALLEY";
+                ev->type_title = (ev->ufo_size == 0) ? "LANDED SCOUT" :
+                                 (ev->ufo_size == 1) ? "LANDED HARVESTER" :
+                                 (ev->ufo_size == 2) ? "LANDED ABDUCTOR" : "LANDED DREADNOUGHT";
+                ev->intel_desc = "INTACT UFO LANDED IN LEHIGH VALLEY!";
             }
         }
     }
     campaign_sync_squad_units();
-    snprintf(g_camp.notice, sizeof(g_camp.notice), "LOADED SAVED GAME (DAY %d)!", g_camp.valley_day);
+    snprintf(g_camp.notice, sizeof(g_camp.notice), "LOADED %s (DAY %d)!",
+             filename ? filename : "DUFFSAVE.SAV", g_camp.valley_day);
     return 1;
+}
+
+static void setup_test_radar_event(int idx, int ev_num, int biome, int site,
+                                   int ufo_sz, int is_flying, int severity, const char *tag) {
+    RadarEvent *ev = &g_camp.events[idx];
+    int sx = HQ_RADAR_X, sy = HQ_RADAR_Y;
+    memset(ev, 0, sizeof(*ev));
+    ev->active      = 1;
+    ev->event_num   = ev_num;
+    ev->biome_id    = biome;
+    ev->ufo_size    = ufo_sz;
+    ev->is_flying   = is_flying;
+    ev->severity    = severity;
+    ev->ufo_hp_max  = (ufo_sz == 0) ? 60 : (ufo_sz == 1 ? 120 : (ufo_sz == 2 ? 190 : 260));
+    ev->ufo_hp      = ev->ufo_hp_max;
+    ev->vx          = (idx & 1) ? -2 : 2;
+    ev->vy          = (idx & 1) ? 1 : -1;
+    ev->flight_mins = is_flying ? 60 : 0;
+    ev->ttl_ticks   = 2880;
+    if (biome == BIOME_BASE_DEFENSE) {
+        ev->rx         = HQ_RADAR_X;
+        ev->ry         = HQ_RADAR_Y;
+        ev->type_title = "BASE RETALIATION";
+        ev->loc_name   = "COOPERSBURG HQ BASE";
+        ev->intel_desc = "ALIENS ATTACKING DUFF-COM HOME BASE!";
+    } else {
+        site_screen_xy(biome & 3, site & 3, &sx, &sy);
+        ev->rx = sx;
+        ev->ry = sy;
+        update_event_nearest_site(ev);
+        ev->type_title = is_flying ? "FLYING UFO" : (severity == 2 ? "TERROR RAID" : (severity == 0 ? "CRASHED UFO" : "LANDED UFO"));
+        ev->intel_desc = "ALIEN CONTACT IN LEHIGH VALLEY";
+    }
+    snprintf(ev->tag, sizeof(ev->tag), "%s", tag);
+}
+
+static void promote_test_squad(int count, int min_rank, int max_rank, int primary_wep,
+                               int sidearm, int special, int gren_type, int psi_count) {
+    static const char *extra_names[6] = {
+        "VANCE", "MORGAN", "REYES", "BISHOP", "HUDSON", "VASQUEZ"
+    };
+    int i;
+    for (i = 0; i < count && i < MAX_ROSTER_SIZE; i++) {
+        Operative *op = &g_camp.squad[i];
+        int target_rank = min_rank + ((max_rank > min_rank) ? (i % (max_rank - min_rank + 1)) : 0);
+        if (!op->active) {
+            int g = (i & 1);
+            int p = g ? (6 + (i % 6)) : (i % 6);
+            operative_init_rookie(op, extra_names[(i - 5 >= 0) ? ((i - 5) % 6) : (i % 6)], g, p, primary_wep);
+        }
+        op->active       = 1;
+        op->assigned_arv = (i < MAX_SQUAD_SIZE) ? 1 : 0;
+        while (op->rank < target_rank) {
+            operative_add_xp(op, 120);
+        }
+        op->missions    = 2 + op->rank * 2;
+        op->kills       = 3 + op->rank * 3;
+        op->weapon_id   = primary_wep;
+        op->sidearm_id  = sidearm;
+        op->special_id  = (i < psi_count) ? ITEM_MIND_PROBE :
+                          ((i % 3 == 0) ? ITEM_MEDKIT : special);
+        op->grenade_id  = gren_type;
+        op->grenades    = 2;
+        op->extra_clips = 2;
+        op->flares      = 1;
+        if (i < psi_count) {
+            op->psi_trained = 2;
+            op->psi_skill   = 78 + (i * 5) % 20;
+        }
+    }
+}
+
+/* Pre-generate 5 Campaign Save Game presets (SAVE1.SAV .. SAVE5.SAV + DUFFSAVE.SAV) for testing */
+void campaign_seed_test_saves(int force_overwrite) {
+    static const char *slot_files[5] = {
+        "SAVE1.SAV", "SAVE2.SAV", "SAVE3.SAV", "SAVE4.SAV", "SAVE5.SAV"
+    };
+    int slot, i;
+
+    for (slot = 0; slot < 5; slot++) {
+        if (!force_overwrite) {
+            FILE *chk = fopen(slot_files[slot], "rb");
+            if (chk) {
+                fclose(chk);
+                continue;
+            }
+        }
+
+        campaign_init();
+        memset(g_camp.tech_scientists, 0, sizeof(g_camp.tech_scientists));
+        g_camp.active_tech = TECH_NONE;
+
+        if (slot == 0) {
+            /* ================================================================
+             * SAVE1.SAV: Early-Mid Game (Laser Weapons, Quad-Copter Drone,
+             * Mk1 ARV Roof Turret, Stun Rod/Grenades, Scientist Assignment)
+             * ================================================================ */
+            g_camp.valley_day    = 6;
+            g_camp.valley_minute = 14 * 60; /* 14:00 Daylight */
+            g_camp.missions_won  = 3;
+            g_camp.win_streak    = 2;
+            g_camp.total_kills   = 18;
+            g_camp.total_score   = 1450;
+            g_camp.money         = 35000;
+            g_camp.scientists    = 4;
+            g_camp.engineers     = 4;
+            g_camp.alloys        = 32;
+            g_camp.elerium       = 8;
+
+            g_camp.bunker_grid[0][0] = FAC_QUARTERS;
+            g_camp.bunker_grid[0][2] = FAC_CONTAINMENT;
+            g_camp.bunker_grid[0][3] = FAC_MISSILE_DEF;
+            g_camp.bunker_grid[1][3] = FAC_UPG_LAB;
+
+            g_camp.tech_done[TECH_LASER_WEAPONS]    = 1;
+            g_camp.tech_done[TECH_LASER_PISTOL]     = 1;
+            g_camp.tech_done[TECH_LASER_RIFLE]      = 1;
+            g_camp.tech_done[TECH_HEAVY_LASER]      = 1;
+            g_camp.tech_done[TECH_ARV_TURRET]       = 1;
+            g_camp.tech_done[TECH_MEDKIT]           = 1;
+            g_camp.tech_done[TECH_QUAD_DRONE]       = 1;
+            g_camp.tech_done[TECH_UFO_CONSTRUCTION] = 1;
+
+            /* Active Research in progress for testing [-]/[+] Scientist assignment */
+            g_camp.active_tech = TECH_AUTOPSY_SECTOID;
+            g_camp.tech_scientists[TECH_AUTOPSY_SECTOID] = 2;
+            g_camp.tech_prog[TECH_AUTOPSY_SECTOID]       = 24;
+            g_camp.tech_scientists[TECH_PLASMA_WEAPONS]  = 2;
+            g_camp.tech_prog[TECH_PLASMA_WEAPONS]        = 30;
+
+            g_camp.arv_turret_level = 1;
+            g_camp.arv_drone_item   = ITEM_QUAD_DRONE;
+
+            g_camp.stores[ITEM_LASER_RIFLE]     = 4;
+            g_camp.stores[ITEM_LASER_PISTOL]    = 4;
+            g_camp.stores[ITEM_HEAVY_LASER]     = 2;
+            g_camp.stores[ITEM_LASER_BATTERY]   = 12;
+            g_camp.stores[ITEM_HEAVY_LASER_PAK] = 6;
+            g_camp.stores[ITEM_STUN_ROD]        = 3;
+            g_camp.stores[ITEM_STUN_GRENADE]    = 6;
+            g_camp.stores[ITEM_MEDKIT]          = 4;
+            g_camp.stores[ITEM_QUAD_DRONE]      = 1;
+            g_camp.stores[ITEM_ALLOYS]          = 32;
+            g_camp.stores[ITEM_ELERIUM]         = 8;
+            g_camp.stores[ITEM_CORPSE_SECTOID]  = 3;
+            g_camp.stores[ITEM_CORPSE_FLOATER]  = 1;
+            g_camp.stores[ITEM_LIVE_SECTOID]    = 1;
+
+            g_camp.arv_cargo[ITEM_LASER_RIFLE]     = 6;
+            g_camp.arv_cargo[ITEM_LASER_PISTOL]    = 3;
+            g_camp.arv_cargo[ITEM_HEAVY_LASER]     = 2;
+            g_camp.arv_cargo[ITEM_LASER_BATTERY]   = 16;
+            g_camp.arv_cargo[ITEM_HEAVY_LASER_PAK] = 6;
+            g_camp.arv_cargo[ITEM_STUN_ROD]        = 3;
+            g_camp.arv_cargo[ITEM_STUN_GRENADE]    = 8;
+            g_camp.arv_cargo[ITEM_MEDKIT]          = 4;
+
+            promote_test_squad(6, RANK_SQUADDIE, RANK_SERGEANT,
+                               ITEM_LASER_RIFLE, ITEM_LASER_PISTOL,
+                               ITEM_STUN_ROD, ITEM_STUN_GRENADE, 0);
+
+            setup_test_radar_event(0, 1, 1, 0, 1, 0, 0, "SITE-01"); /* Crashed Harvester at Quakertown */
+            setup_test_radar_event(1, 2, 0, 0, 0, 0, 1, "UFO-02");  /* Landed Scout at Coopersburg 309 */
+            setup_test_radar_event(2, 3, 2, 1, 1, 1, 1, "AIR-03");  /* Flying Harvester over Emmaus */
+            g_camp.selected_event = 0;
+            g_camp.next_event_num = 3;
+        } else if (slot == 1) {
+            /* ================================================================
+             * SAVE2.SAV: Mid-Late Game (Plasma Weapons, UFO Alloy Hover-Drone,
+             * Mk2 ARV Plasma Turret, Workshop Mfg & Store Transit, Abductor UFO)
+             * ================================================================ */
+            g_camp.valley_day    = 14;
+            g_camp.valley_minute = 21 * 60 + 30; /* 21:30 Night Ops (or advance clock for Day) */
+            g_camp.missions_won  = 6;
+            g_camp.win_streak    = 2;
+            g_camp.total_kills   = 44;
+            g_camp.total_score   = 3600;
+            g_camp.money         = 58000;
+            g_camp.scientists    = 6;
+            g_camp.engineers     = 6;
+            g_camp.alloys        = 65;
+            g_camp.elerium       = 35;
+
+            g_camp.bunker_grid[0][0] = FAC_QUARTERS;
+            g_camp.bunker_grid[0][2] = FAC_CONTAINMENT;
+            g_camp.bunker_grid[0][3] = FAC_MISSILE_DEF;
+            g_camp.bunker_grid[1][3] = FAC_UPG_LAB;
+            g_camp.bunker_grid[2][0] = FAC_UPG_WORKSHOP;
+            g_camp.bunker_grid[2][1] = FAC_QUARTERS;
+            g_camp.bunker_grid[2][2] = FAC_STORES;
+            g_camp.bunker_grid[2][3] = FAC_OFFENSE_SYS;
+
+            for (i = 0; i <= TECH_LIVE_FLOATER; i++) {
+                g_camp.tech_done[i] = 1;
+            }
+            g_camp.tech_done[TECH_UFO_NAVIGATION]   = 1;
+            g_camp.tech_done[TECH_UFO_CONSTRUCTION] = 1;
+
+            /* Active Workshop Manufacture & Store Delivery in transit */
+            g_camp.mfg_queue[ITEM_UFO_DRONE]          = 1;
+            g_camp.mfg_prog[ITEM_UFO_DRONE]           = 60; /* 80% done! */
+            g_camp.store_transit_qty[ITEM_STUN_GRENADE] = 4;
+            g_camp.store_transit_hrs[ITEM_STUN_GRENADE] = 2;
+
+            g_camp.arv_turret_level = 2;
+            g_camp.arv_drone_item   = ITEM_UFO_DRONE;
+
+            g_camp.stores[ITEM_PLASMA_RIFLE]       = 6;
+            g_camp.stores[ITEM_HEAVY_PLASMA]       = 4;
+            g_camp.stores[ITEM_PLASMA_PISTOL]      = 4;
+            g_camp.stores[ITEM_PLASMA_RIFLE_CLIP]  = 14;
+            g_camp.stores[ITEM_HEAVY_PLASMA_CLIP]  = 10;
+            g_camp.stores[ITEM_PLASMA_PISTOL_CLIP] = 10;
+            g_camp.stores[ITEM_ALIEN_GRENADE]      = 8;
+            g_camp.stores[ITEM_STUN_GRENADE]       = 8;
+            g_camp.stores[ITEM_STUN_ROD]           = 4;
+            g_camp.stores[ITEM_MEDKIT]             = 6;
+            g_camp.stores[ITEM_QUAD_DRONE]         = 1;
+            g_camp.stores[ITEM_UFO_DRONE]          = 1;
+            g_camp.stores[ITEM_ALLOYS]             = 65;
+            g_camp.stores[ITEM_ELERIUM]            = 35;
+            g_camp.stores[ITEM_CORPSE_MUTON]       = 2;
+            g_camp.stores[ITEM_LIVE_FLOATER]       = 2;
+
+            g_camp.arv_cargo[ITEM_PLASMA_RIFLE]      = 6;
+            g_camp.arv_cargo[ITEM_HEAVY_PLASMA]      = 2;
+            g_camp.arv_cargo[ITEM_PLASMA_RIFLE_CLIP] = 16;
+            g_camp.arv_cargo[ITEM_HEAVY_PLASMA_CLIP] = 8;
+            g_camp.arv_cargo[ITEM_ALIEN_GRENADE]     = 8;
+            g_camp.arv_cargo[ITEM_STUN_GRENADE]      = 6;
+            g_camp.arv_cargo[ITEM_STUN_ROD]          = 3;
+            g_camp.arv_cargo[ITEM_MEDKIT]            = 5;
+
+            promote_test_squad(7, RANK_SERGEANT, RANK_CAPTAIN,
+                               ITEM_PLASMA_RIFLE, ITEM_PLASMA_PISTOL,
+                               ITEM_MEDKIT, ITEM_ALIEN_GRENADE, 0);
+
+            setup_test_radar_event(0, 1, 3, 0, 2, 0, 1, "UFO-01");  /* Landed Abductor (48x48 2-deck) */
+            setup_test_radar_event(1, 2, 1, 1, 1, 0, 0, "SITE-02"); /* Crashed Harvester */
+            setup_test_radar_event(2, 3, 2, 3, 2, 1, 1, "AIR-03");  /* Flying Abductor */
+            g_camp.selected_event = 0;
+            g_camp.next_event_num = 3;
+        } else if (slot == 2) {
+            /* ================================================================
+             * SAVE3.SAV: Psionics, Mind Probes, Live Aliens in Containment,
+             * Command Dreadnought (48x48 3-Deck Ship w/ Sectoid Commander) & Raid
+             * ================================================================ */
+            g_camp.valley_day    = 22;
+            g_camp.valley_minute = 11 * 60; /* 11:00 Daylight */
+            g_camp.missions_won  = 9;
+            g_camp.win_streak    = 2;
+            g_camp.total_kills   = 72;
+            g_camp.total_score   = 6200;
+            g_camp.money         = 75000;
+            g_camp.scientists    = 6;
+            g_camp.engineers     = 6;
+            g_camp.alloys        = 90;
+            g_camp.elerium       = 60;
+
+            g_camp.bunker_grid[0][0] = FAC_QUARTERS;
+            g_camp.bunker_grid[0][2] = FAC_CONTAINMENT;
+            g_camp.bunker_grid[0][3] = FAC_QUARTERS;
+            g_camp.bunker_grid[1][3] = FAC_UPG_LAB;
+            g_camp.bunker_grid[2][0] = FAC_UPG_WORKSHOP;
+            g_camp.bunker_grid[2][1] = FAC_PSI_LAB;
+            g_camp.bunker_grid[2][2] = FAC_STORES;
+            g_camp.bunker_grid[2][3] = FAC_OFFENSE_SYS;
+
+            for (i = 0; i < TECH_COUNT; i++) {
+                g_camp.tech_done[i] = 1;
+            }
+            /* Leave Live Muton & Live Cryptid Interrogations open to test Live Alien Research */
+            g_camp.tech_done[TECH_LIVE_MUTON]   = 0;
+            g_camp.tech_done[TECH_LIVE_CRYPTID] = 0;
+            g_camp.active_tech = TECH_LIVE_CRYPTID;
+            g_camp.tech_scientists[TECH_LIVE_CRYPTID] = 4;
+            g_camp.tech_prog[TECH_LIVE_CRYPTID]       = 45;
+
+            g_camp.arv_turret_level = 2;
+            g_camp.arv_drone_item   = ITEM_UFO_DRONE;
+
+            g_camp.stores[ITEM_PLASMA_RIFLE]       = 8;
+            g_camp.stores[ITEM_HEAVY_PLASMA]       = 6;
+            g_camp.stores[ITEM_PLASMA_RIFLE_CLIP]  = 20;
+            g_camp.stores[ITEM_HEAVY_PLASMA_CLIP]  = 16;
+            g_camp.stores[ITEM_MIND_PROBE]         = 6;
+            g_camp.stores[ITEM_MEDKIT]             = 6;
+            g_camp.stores[ITEM_STUN_ROD]           = 4;
+            g_camp.stores[ITEM_STUN_GRENADE]       = 10;
+            g_camp.stores[ITEM_ALIEN_GRENADE]      = 10;
+            g_camp.stores[ITEM_UFO_DRONE]          = 2;
+            g_camp.stores[ITEM_QUAD_DRONE]         = 1;
+            g_camp.stores[ITEM_ALLOYS]             = 90;
+            g_camp.stores[ITEM_ELERIUM]            = 60;
+            g_camp.stores[ITEM_LIVE_SECTOID_CMDR]  = 1;
+            g_camp.stores[ITEM_LIVE_MUTON]         = 2;
+            g_camp.stores[ITEM_LIVE_CRYPTID]       = 1;
+            g_camp.stores[ITEM_CORPSE_CRYPTID]     = 2;
+
+            g_camp.arv_cargo[ITEM_PLASMA_RIFLE]      = 6;
+            g_camp.arv_cargo[ITEM_HEAVY_PLASMA]      = 3;
+            g_camp.arv_cargo[ITEM_PLASMA_RIFLE_CLIP] = 18;
+            g_camp.arv_cargo[ITEM_HEAVY_PLASMA_CLIP] = 10;
+            g_camp.arv_cargo[ITEM_MIND_PROBE]        = 5;
+            g_camp.arv_cargo[ITEM_MEDKIT]            = 4;
+            g_camp.arv_cargo[ITEM_STUN_ROD]          = 3;
+            g_camp.arv_cargo[ITEM_STUN_GRENADE]      = 6;
+            g_camp.arv_cargo[ITEM_ALIEN_GRENADE]     = 6;
+
+            promote_test_squad(10, RANK_CAPTAIN, RANK_COLONEL,
+                               ITEM_PLASMA_RIFLE, ITEM_STUN_ROD,
+                               ITEM_MEDKIT, ITEM_ALIEN_GRENADE, 4);
+            /* Put reserve operatives 8 & 9 in active Psi-Training (12 hours remaining) */
+            g_camp.squad[8].assigned_arv   = 0;
+            g_camp.squad[8].psi_trained    = 1;
+            g_camp.squad[8].psi_hours_left = 12;
+            g_camp.squad[9].assigned_arv   = 0;
+            g_camp.squad[9].psi_trained    = 1;
+            g_camp.squad[9].psi_hours_left = 12;
+
+            setup_test_radar_event(0, 1, 3, 0, 3, 0, 1, "UFO-01");  /* Command Dreadnought (48x48 3-Deck!) */
+            setup_test_radar_event(1, 2, 2, 0, 2, 0, 2, "RAID-02"); /* Alien Terror Raid at Coopersburg Suburb */
+            setup_test_radar_event(2, 3, 0, 1, 3, 1, 1, "AIR-03");  /* Flying Command Dreadnought */
+            g_camp.selected_event = 0;
+            g_camp.next_event_num = 3;
+        } else if (slot == 3) {
+            /* ================================================================
+             * SAVE4.SAV: 100% Unlocked Master Sandbox (All 31 Techs & Logs,
+             * All Items/Corpses/Live Aliens, 8 Commander/Colonel Psi Operatives)
+             * ================================================================ */
+            g_camp.valley_day    = 30;
+            g_camp.valley_minute = 12 * 60; /* 12:00 Noon Daylight */
+            g_camp.missions_won  = 14;
+            g_camp.win_streak    = 2;
+            g_camp.total_kills   = 128;
+            g_camp.total_score   = 12500;
+            g_camp.money         = 99999;
+            g_camp.scientists    = 6;
+            g_camp.engineers     = 6;
+            g_camp.alloys        = 150;
+            g_camp.elerium       = 120;
+
+            g_camp.bunker_grid[0][0] = FAC_QUARTERS;
+            g_camp.bunker_grid[0][2] = FAC_CONTAINMENT;
+            g_camp.bunker_grid[0][3] = FAC_QUARTERS;
+            g_camp.bunker_grid[1][3] = FAC_UPG_LAB;
+            g_camp.bunker_grid[2][0] = FAC_UPG_WORKSHOP;
+            g_camp.bunker_grid[2][1] = FAC_PSI_LAB;
+            g_camp.bunker_grid[2][2] = FAC_STORES;
+            g_camp.bunker_grid[2][3] = FAC_OFFENSE_SYS;
+
+            for (i = 0; i < TECH_COUNT; i++) {
+                g_camp.tech_done[i] = 1;
+            }
+            for (i = 0; i < ITEM_COUNT; i++) {
+                g_camp.item_seen[i] = 1;
+                g_camp.stores[i]    = 6;
+            }
+            g_camp.stores[ITEM_ALLOYS]  = 150;
+            g_camp.stores[ITEM_ELERIUM] = 120;
+
+            g_camp.arv_turret_level = 2;
+            g_camp.arv_drone_item   = ITEM_UFO_DRONE;
+
+            g_camp.arv_cargo[ITEM_HEAVY_PLASMA]      = 4;
+            g_camp.arv_cargo[ITEM_PLASMA_RIFLE]      = 6;
+            g_camp.arv_cargo[ITEM_HEAVY_PLASMA_CLIP] = 12;
+            g_camp.arv_cargo[ITEM_PLASMA_RIFLE_CLIP] = 16;
+            g_camp.arv_cargo[ITEM_MIND_PROBE]        = 6;
+            g_camp.arv_cargo[ITEM_MEDKIT]            = 6;
+            g_camp.arv_cargo[ITEM_STUN_ROD]          = 4;
+            g_camp.arv_cargo[ITEM_STUN_GRENADE]      = 8;
+            g_camp.arv_cargo[ITEM_ALIEN_GRENADE]     = 8;
+
+            promote_test_squad(10, RANK_COLONEL, RANK_COMMANDER,
+                               ITEM_HEAVY_PLASMA, ITEM_MIND_PROBE,
+                               ITEM_MEDKIT, ITEM_ALIEN_GRENADE, 8);
+
+            setup_test_radar_event(0, 1, 3, 3, 3, 0, 1, "UFO-01");  /* Command Dreadnought at Easton */
+            setup_test_radar_event(1, 2, 1, 0, 2, 0, 0, "SITE-02"); /* Crashed Abductor at Quakertown */
+            setup_test_radar_event(2, 3, 0, 0, 0, 0, 1, "UFO-03");  /* Landed Small Scout at Coopersburg */
+            g_camp.selected_event = 0;
+            g_camp.next_event_num = 3;
+        } else {
+            /* ================================================================
+             * SAVE5.SAV: Coopersburg HQ Home Base Retaliation Defense +
+             * Flying UFO Fly-Past Escape Test
+             * ================================================================ */
+            g_camp.valley_day    = 18;
+            g_camp.valley_minute = 15 * 60; /* 15:00 Daylight */
+            g_camp.missions_won  = 8;
+            g_camp.win_streak    = 0;
+            g_camp.total_kills   = 60;
+            g_camp.total_score   = 4900;
+            g_camp.money         = 64000;
+            g_camp.scientists    = 6;
+            g_camp.engineers     = 6;
+            g_camp.alloys        = 70;
+            g_camp.elerium       = 45;
+
+            g_camp.bunker_grid[0][0] = FAC_QUARTERS;
+            g_camp.bunker_grid[0][2] = FAC_CONTAINMENT;
+            g_camp.bunker_grid[0][3] = FAC_QUARTERS;
+            g_camp.bunker_grid[1][3] = FAC_UPG_LAB;
+            g_camp.bunker_grid[2][0] = FAC_UPG_WORKSHOP;
+            g_camp.bunker_grid[2][1] = FAC_PSI_LAB;
+            g_camp.bunker_grid[2][2] = FAC_STORES;
+            g_camp.bunker_grid[2][3] = FAC_OFFENSE_SYS;
+
+            for (i = 0; i < TECH_COUNT; i++) {
+                g_camp.tech_done[i] = 1;
+            }
+            g_camp.arv_turret_level = 2;
+            g_camp.arv_drone_item   = ITEM_UFO_DRONE;
+
+            g_camp.stores[ITEM_PLASMA_RIFLE]      = 8;
+            g_camp.stores[ITEM_HEAVY_PLASMA]      = 4;
+            g_camp.stores[ITEM_PLASMA_RIFLE_CLIP] = 20;
+            g_camp.stores[ITEM_HEAVY_PLASMA_CLIP] = 12;
+            g_camp.stores[ITEM_ALIEN_GRENADE]     = 10;
+            g_camp.stores[ITEM_MEDKIT]            = 6;
+            g_camp.stores[ITEM_MIND_PROBE]        = 4;
+
+            g_camp.arv_cargo[ITEM_PLASMA_RIFLE]      = 6;
+            g_camp.arv_cargo[ITEM_HEAVY_PLASMA]      = 3;
+            g_camp.arv_cargo[ITEM_PLASMA_RIFLE_CLIP] = 18;
+            g_camp.arv_cargo[ITEM_HEAVY_PLASMA_CLIP] = 10;
+            g_camp.arv_cargo[ITEM_ALIEN_GRENADE]     = 8;
+            g_camp.arv_cargo[ITEM_MEDKIT]            = 6;
+            g_camp.arv_cargo[ITEM_MIND_PROBE]        = 4;
+
+            promote_test_squad(8, RANK_CAPTAIN, RANK_COLONEL,
+                               ITEM_PLASMA_RIFLE, ITEM_MIND_PROBE,
+                               ITEM_MEDKIT, ITEM_ALIEN_GRENADE, 4);
+
+            setup_test_radar_event(0, 1, BIOME_BASE_DEFENSE, 0, 2, 0, 2, "BASE-HQ");
+            setup_test_radar_event(1, 2, 1, 2, 0, 1, 1, "AIR-02");
+            g_camp.events[1].flight_mins = 12;
+            g_camp.selected_event  = 0;
+            g_camp.selected_sector = BIOME_BASE_DEFENSE;
+            g_camp.next_event_num  = 2;
+        }
+
+        campaign_save_game(slot_files[slot]);
+        if (slot == 0) {
+            FILE *chk_def = fopen("DUFFSAVE.SAV", "rb");
+            if (!chk_def || force_overwrite) {
+                if (chk_def) fclose(chk_def);
+                campaign_save_game("DUFFSAVE.SAV");
+            } else {
+                fclose(chk_def);
+            }
+        }
+    }
 }
 
 static void radar_pset_clip(int x, int y, uint8_t col) {

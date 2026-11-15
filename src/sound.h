@@ -25,6 +25,8 @@ enum {
     SFX_ID_ALERT,       /* Alien spotted / Reaction Fire / Low TU alert */
     SFX_ID_CIV_SCREAM_M,/* Male Civilian panic scream when spotting an alien */
     SFX_ID_CIV_SCREAM_F,/* Female Civilian panic scream when spotting an alien */
+    SFX_ID_DRONE_QUAD,  /* Quad-Copter electric motor & rotor blade whir */
+    SFX_ID_DRONE_UFO,   /* UFO Drone alien anti-gravity thruster hum */
     SFX_COUNT
 };
 
@@ -43,6 +45,8 @@ void sound_play_civ_scream(int gender);
 void sfx_beep(int freq_hz, int duration_ms);
 void sfx_click(void);
 void sfx_step(void);
+void sfx_drone_quad(void);
+void sfx_drone_ufo(void);
 void sfx_door(void);
 void sfx_rifle(void);
 void sfx_laser(void);

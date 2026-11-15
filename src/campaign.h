@@ -196,6 +196,7 @@ int  campaign_arv_max_space(void);
 /* Phase 6: Persistent Save / Load Game System */
 int  campaign_save_game(const char *filename);
 int  campaign_load_game(const char *filename);
+void campaign_seed_test_saves(int force_overwrite);
 
 #endif /* CAMPAIGN_H */
 

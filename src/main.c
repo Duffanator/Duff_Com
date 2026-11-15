@@ -73,6 +73,9 @@ int main(int argc, char **argv) {
             snap_mode = 2;
         } else if (strcmp(argv[i], "-snap-inv") == 0 || strcmp(argv[i], "--snap-inv") == 0) {
             snap_mode = 3;
+        } else if (strcmp(argv[i], "-gen-saves") == 0 || strcmp(argv[i], "--gen-saves") == 0) {
+            campaign_seed_test_saves(1);
+            return 0;
         }
     }
 
@@ -89,6 +92,7 @@ int main(int argc, char **argv) {
     music_init();
     music_set_volume(g_settings.music_vol);
     input_init();
+    campaign_seed_test_saves(0);
     campaign_init();
     isomap_init();
     campaign_sync_squad_units();
@@ -198,6 +202,9 @@ int main(int argc, char **argv) {
             if (settings_handle_input(1) == 1) {
                 g_settings.menu_open = 0;
                 campaign_on_mission_complete();
+                continue;
+            }
+            if (g_camp.mode == 0) {
                 continue;
             }
             isomap_render();
@@ -314,10 +321,15 @@ int main(int argc, char **argv) {
                 if (g_battle.inv_modal_open) {
                     g_battle.pre_mission_equip = 0;
                     g_battle.inv_modal_open    = 0;
+                    sfx_click();
+                } else if (g_units[g_battle.selected_unit].is_drone > 0) {
+                    snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),
+                             "DRONE HAS NO INVENTORY BAY!");
+                    sfx_beep(200, 50);
                 } else {
                     g_battle.inv_modal_open    = 1;
+                    sfx_click();
                 }
-                sfx_click();
                 break;
 
             case 'm':

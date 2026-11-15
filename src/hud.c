@@ -1405,8 +1405,18 @@ void hud_render(void) {
 
     /* When Inventory / Pre-Mission Equip is open, render the Full-Screen 320x200 Paper-Doll UI! */
     if (g_battle.inv_modal_open) {
-        render_inv_modal();
-        return;
+        if (u->is_drone > 0) {
+            if (g_battle.pre_mission_equip) {
+                g_battle.selected_unit = 0;
+                u = &g_units[0];
+            } else {
+                g_battle.inv_modal_open = 0;
+            }
+        }
+        if (g_battle.inv_modal_open) {
+            render_inv_modal();
+            return;
+        }
     }
 
     /* Main X-COM Metallic Beveled Control Panel (y=144..199) */
@@ -1470,18 +1480,26 @@ void hud_render(void) {
     }
 
 
-    /* 2. Soldier Portrait Box (x=51, y=156, w=36, h=38) */
+    /* 2. Soldier / Drone Portrait Box (x=51, y=156, w=36, h=38) */
     vga_rect_bevel(51, 156, 36, 38, 14, 163, 172);
-    vga_blit_ui(53, 157, 32, 36, spr_portraits[u->portrait_id % NUM_PORTRAITS]);
+    if (u->is_drone > 0) {
+        vga_blit_ui(53, 157, 32, 36, spr_drone_portraits[(u->is_drone == 2) ? 1 : 0]);
+    } else {
+        vga_blit_ui(53, 157, 32, 36, spr_portraits[u->portrait_id % NUM_PORTRAITS]);
+    }
 
     /* 3. Center Soldier Name & Stat Bars (TU, HP, EN) */
     vga_rect_bevel(90, 156, 111, 38, 169, 172, 163);
-    operative_draw_rank_badge(93, 158, u->rank);
-    vga_print_shadow(104, 158, u->name, 96, 15);
-    if (!u->is_drone && u->morale < 100) {
-        char m_str[16];
-        snprintf(m_str, sizeof(m_str), "M%d", (int)u->morale);
-        vga_print(176, 158, m_str, (u->morale < 50) ? 33 : 80);
+    if (u->is_drone > 0) {
+        vga_print_shadow(94, 158, u->name, 80, 15);
+    } else {
+        operative_draw_rank_badge(93, 158, u->rank);
+        vga_print_shadow(104, 158, u->name, 96, 15);
+        if (u->morale < 100) {
+            char m_str[16];
+            snprintf(m_str, sizeof(m_str), "M%d", (int)u->morale);
+            vga_print(176, 158, m_str, (u->morale < 50) ? 33 : 80);
+        }
     }
 
     draw_stat_bar(93, 167, "TU", u->tu,     u->tu_max,     18);  /* Bright Green TU */
@@ -1491,13 +1509,15 @@ void hud_render(void) {
     /* 4. Right Tactical Arcade Button Grid */
     for (i = 1; i < NUM_HUD_BTNS; i++) {
         const HudButton *b = &hud_buttons[i];
+        int disabled = (u->is_drone > 0 && (b->action_id == ACT_INV || b->action_id == ACT_KNEEL));
         int active = 0;
-        int hovered = (g_input.mx >= b->x && g_input.mx < b->x + b->w &&
+        int hovered = (!disabled &&
+                       g_input.mx >= b->x && g_input.mx < b->x + b->w &&
                        g_input.my >= b->y && g_input.my < b->y + b->h);
-        uint8_t fill = 166;
-        if (b->action_id == ACT_KNEEL   && u->stance) active = 1;
+        uint8_t fill = disabled ? 13 : 166;
+        if (!disabled && b->action_id == ACT_KNEEL   && u->stance) active = 1;
         if (b->action_id == ACT_ROOF    && g_battle.roof_cutaway) active = 1;
-        if (b->action_id == ACT_INV     && g_battle.inv_modal_open) active = 1;
+        if (!disabled && b->action_id == ACT_INV     && g_battle.inv_modal_open) active = 1;
         if (b->action_id == ACT_RESERVE && g_battle.reserve_mode > 0) active = 1;
         if (b->action_id == ACT_OPTIONS && g_settings.menu_open) active = 1;
 
@@ -1507,10 +1527,12 @@ void hud_render(void) {
         if (b->action_id == ACT_OPTIONS)  fill = 68;
         if (hovered) fill = (b->action_id == ACT_END_TURN) ? 34 : 65;
 
-        vga_rect_bevel(b->x, b->y, b->w, b->h, fill, (active || hovered) ? 96 : 162, 172);
+        vga_rect_bevel(b->x, b->y, b->w, b->h, fill,
+                       disabled ? 11 : ((active || hovered) ? 96 : 162),
+                       disabled ? 15 : 172);
         vga_print_shadow(b->x + (b->w - (int)strlen(b->label) * 6) / 2,
                          b->y + (b->h - 6) / 2,
-                         b->label, (active || hovered) ? 96 : 1, 15);
+                         b->label, disabled ? 8 : ((active || hovered) ? 96 : 1), 15);
     }
 
     /* 5. Classic X-COM Popup Hand & Firing Menu when Weapon Slot is Clicked! */
@@ -1611,9 +1633,17 @@ void hud_render(void) {
                     snprintf(opt_buf, sizeof(opt_buf), "3.AUTO  18TU (%2d%%)",
                              isomap_calc_shot_acc(u, 3, 6));
                 } else if (row == 3) {
-                    snprintf(opt_buf, sizeof(opt_buf), "4.THROW WEP  (10TU)");
+                    if (u->is_drone > 0) {
+                        snprintf(opt_buf, sizeof(opt_buf), "ONBOARD WEAPON MOUNT");
+                        tc = 80;
+                    } else {
+                        snprintf(opt_buf, sizeof(opt_buf), "4.THROW WEP  (10TU)");
+                    }
                 } else {
-                    if (pen_pct < 100) {
+                    if (u->is_drone > 0) {
+                        snprintf(opt_buf, sizeof(opt_buf), "AUTONOMOUS DRONE UNIT");
+                        tc = 18;
+                    } else if (pen_pct < 100) {
                         snprintf(opt_buf, sizeof(opt_buf), "2H PENALTY: -%d%% AIM", 100 - pen_pct);
                         tc = 113;
                     } else {
@@ -1721,7 +1751,7 @@ int hud_handle_click(int mx, int my, int right_click) {
             my >= POPUP_Y && my < POPUP_Y + POPUP_H) {
             /* 1. Top Hand Selector Tabs (R.HAND vs L.HAND) */
             if (my >= POPUP_Y + 3 && my < POPUP_Y + 17) {
-                if (mx < POPUP_X + 74) {
+                if (mx < POPUP_X + 74 || u->is_drone > 0) {
                     u->active_hand = 0;
                     isomap_sync_unit_inventory(u);
                     sfx_click();
@@ -1808,6 +1838,10 @@ int hud_handle_click(int mx, int my, int right_click) {
                         sfx_click();
                         return 1;
                     } else if (row == 3) {
+                        if (u->is_drone > 0) {
+                            sfx_beep(200, 50);
+                            return 1;
+                        }
                         set_unit_slot_item_primed(u, hand_slot, ITEM_NONE, 0, -1);
                         g_battle.throw_item_id    = hand_item;
                         g_battle.throw_prime      = -1;
@@ -1818,6 +1852,11 @@ int hud_handle_click(int mx, int my, int right_click) {
                         sfx_click();
                         return 1;
                     } else if (row == 4) {
+                        if (u->is_drone > 0) {
+                            g_battle.weapon_menu_open = 0;
+                            sfx_click();
+                            return 1;
+                        }
                         g_battle.weapon_menu_open = 0;
                         g_battle.inv_modal_open   = 1;
                         sfx_click();
@@ -1936,6 +1975,12 @@ int hud_handle_click(int mx, int my, int right_click) {
                     break;
 
                 case ACT_INV:
+                    if (g_units[g_battle.selected_unit].is_drone > 0) {
+                        snprintf(g_battle.status_msg, sizeof(g_battle.status_msg),
+                                 "DRONE HAS NO INVENTORY BAY!");
+                        sfx_beep(200, 50);
+                        break;
+                    }
                     g_battle.weapon_menu_open = 0;
                     g_battle.inv_modal_open = !g_battle.inv_modal_open;
                     sfx_click();

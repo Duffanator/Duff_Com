@@ -12,12 +12,21 @@ public class DuffArtGen {
 
     // Save 24-bit uncompressed BMP so DOS bmp_loader reads it directly
     static void SaveBmp24(Bitmap bmp, string path) {
-        using (Bitmap b24 = new Bitmap(bmp.Width, bmp.Height, PixelFormat.Format24bppRgb)) {
-            using (Graphics g = Graphics.FromImage(b24)) {
-                g.Clear(Trans);
-                g.DrawImage(bmp, 0, 0, bmp.Width, bmp.Height);
+        int w = bmp.Width, h = bmp.Height;
+        int stride = (w * 3 + 3) & ~3;
+        using (var fs = new FileStream(path, FileMode.Create))
+        using (var bw = new BinaryWriter(fs)) {
+            int dataSize = stride * h;
+            bw.Write((byte)'B'); bw.Write((byte)'M'); bw.Write(54 + dataSize); bw.Write(0); bw.Write(54);
+            bw.Write(40); bw.Write(w); bw.Write(h); bw.Write((short)1); bw.Write((short)24); bw.Write(0);
+            bw.Write(dataSize); bw.Write(2835); bw.Write(2835); bw.Write(0); bw.Write(0);
+            for (int y = h - 1; y >= 0; y--) {
+                for (int x = 0; x < w; x++) {
+                    Color c = bmp.GetPixel(x, y);
+                    bw.Write(c.B); bw.Write(c.G); bw.Write(c.R);
+                }
+                for (int p = w * 3; p < stride; p++) bw.Write((byte)0);
             }
-            b24.Save(path, ImageFormat.Bmp);
         }
     }
 

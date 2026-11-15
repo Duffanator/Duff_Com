@@ -11,6 +11,18 @@
 GameSettings g_settings;
 static int opt_sel_row = 0; /* Keyboard focus row (0..4) */
 static int opt_sel_btn = 0; /* Bottom row focus: 0=RESUME, 1=ABORT/QUIT */
+static int opt_save_slot = 0; /* Selected save slot (0..4 -> SAVE1.SAV .. SAVE5.SAV) */
+
+static const char *save_slot_files[5] = {
+    "SAVE1.SAV", "SAVE2.SAV", "SAVE3.SAV", "SAVE4.SAV", "SAVE5.SAV"
+};
+static const char *save_slot_labels[5] = {
+    "SLOT 1: LASER",
+    "SLOT 2: PLASMA",
+    "SLOT 3: PSI+CMD",
+    "SLOT 4: SANDBOX",
+    "SLOT 5: HQ DEF"
+};
 
 void settings_init(void) {
     FILE *fp;
@@ -178,9 +190,10 @@ void settings_render_modal(int in_battlescape) {
     draw_opt_pill(168, 112, 58, 18, "NORM", g_settings.scroll_speed == 1, 0);
     draw_opt_pill(230, 112, 52, 18, "FAST", g_settings.scroll_speed == 2, 0);
 
-    /* Row 4: SAVE GAME & LOAD GAME (DUFFSAVE.SAV) */
-    draw_opt_pill(38,  134, 118, 18, "SAVE GAME", 0, 0);
-    draw_opt_pill(164, 134, 118, 18, "LOAD GAME", 0, 0);
+    /* Row 4: 5-SLOT SAVE / LOAD SELECTOR (SAVE1.SAV .. SAVE5.SAV) */
+    draw_opt_pill(38,  134, 116, 18, save_slot_labels[opt_save_slot % 5], 1, 0);
+    draw_opt_pill(158, 134, 60,  18, "SAVE", 0, 0);
+    draw_opt_pill(222, 134, 60,  18, "LOAD", 0, 0);
 
     /* Row 5: RESUME GAME & ABORT MISSION / QUIT TO DOS */
     draw_opt_pill(38,  156, 118, 20, "RESUME GAME",
@@ -315,16 +328,24 @@ int settings_handle_input(int in_battlescape) {
         return 0;
     }
 
-    /* Row 4: SAVE GAME / LOAD GAME */
+    /* Row 4: SAVE SLOT SELECTOR / SAVE / LOAD */
     if (my >= 134 && my < 153) {
-        if (mx >= 38 && mx < 156) {
+        if (mx >= 38 && mx < 154) {
+            opt_save_slot = (opt_save_slot + 1) % 5;
+            sfx_click();
+            return 0;
+        }
+        if (mx >= 158 && mx < 218) {
+            campaign_save_game(save_slot_files[opt_save_slot % 5]);
             campaign_save_game("DUFFSAVE.SAV");
             g_settings.menu_open = 0;
             sfx_beep(660, 60);
             return 0;
         }
-        if (mx >= 164 && mx < 282) {
-            if (campaign_load_game("DUFFSAVE.SAV")) {
+        if (mx >= 222 && mx < 282) {
+            const char *fname = save_slot_files[opt_save_slot % 5];
+            if (campaign_load_game(fname) ||
+                (opt_save_slot == 0 && campaign_load_game("DUFFSAVE.SAV"))) {
                 g_settings.menu_open = 0;
                 sfx_beep(784, 70);
             } else {

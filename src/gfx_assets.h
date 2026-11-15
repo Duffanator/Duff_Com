@@ -195,8 +195,9 @@ extern uint8_t spr_splash[SPLASH_TYPE_COUNT][4][FX_W * FX_H];
 #define FULLBODY_W       48
 #define FULLBODY_H       96
 
-/* Portraits (12 x 32x36: 0..5 Male, 6..11 Female), Full-Body Paper-Dolls (12 x 48x96) & Weapon Icons (40x24) */
+/* Portraits (12 x 32x36: 0..5 Male, 6..11 Female), Drone Portraits (2 x 32x36: 0=Quad, 1=UFO), Full-Body Paper-Dolls (12 x 48x96) & Weapon Icons (40x24) */
 extern uint8_t spr_portraits[NUM_PORTRAITS][32 * 36];
+extern uint8_t spr_drone_portraits[2][32 * 36];
 extern uint8_t spr_fullbody[NUM_PORTRAITS][FULLBODY_W * FULLBODY_H];
 extern uint8_t spr_weapons[4][40 * 24];
 

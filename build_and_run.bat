@@ -33,6 +33,8 @@ if %ERRORLEVEL% NEQ 0 (
 copy /Y dist\DUFFCOM.EXE build\main.exe >nul
 copy /Y ROSTER.CFG dist\ROSTER.CFG >nul
 if not exist dist\SETTINGS.CFG copy /Y SETTINGS.CFG dist\SETTINGS.CFG >nul
+if exist SAVE1.SAV if not exist dist\SAVE1.SAV copy /Y *.SAV dist\ >nul
+if exist SAVE1.SAV if not exist build\SAVE1.SAV copy /Y *.SAV build\ >nul
 copy /Y assets\*.* dist\assets\ >nul
 copy /Y assets\*.* build\assets\ >nul
 

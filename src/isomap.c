@@ -1373,6 +1373,7 @@ void isomap_select_next_soldier(void) {
     for (i = 1; i <= MAX_UNITS; i++) {
         int idx = (start + i) % MAX_UNITS;
         if (g_units[idx].active && g_units[idx].faction == 0) {
+            if (g_battle.inv_modal_open && g_units[idx].is_drone > 0) continue;
             g_battle.selected_unit = idx;
             g_battle.view_level = g_units[idx].z;
             g_battle.cur_x = g_units[idx].x;
@@ -1394,6 +1395,7 @@ void isomap_select_prev_soldier(void) {
     for (i = 1; i <= MAX_UNITS; i++) {
         int idx = (start + MAX_UNITS - i) % MAX_UNITS;
         if (g_units[idx].active && g_units[idx].faction == 0) {
+            if (g_battle.inv_modal_open && g_units[idx].is_drone > 0) continue;
             g_battle.selected_unit = idx;
             g_battle.view_level = g_units[idx].z;
             g_battle.cur_x = g_units[idx].x;
@@ -1413,6 +1415,11 @@ void isomap_toggle_kneel(void) {
     Unit *u = &g_units[g_battle.selected_unit];
     int cost = u->stance ? 8 : 4;
     if (!u->active || u->faction != 0 || g_battle.walking_active) return;
+    if (u->is_drone > 0) {
+        set_status("DRONE CANNOT KNEEL!");
+        sfx_beep(200, 50);
+        return;
+    }
     if (u->tu < cost) {
         set_status("NOT ENOUGH TIME UNITS!");
         sfx_beep(220, 60);
@@ -1586,7 +1593,9 @@ void isomap_update_walk(void) {
             sfx_door();
         }
         if (!door_opened) {
-            sfx_step();
+            if (u->is_drone == 1)      sfx_drone_quad();
+            else if (u->is_drone == 2) sfx_drone_ufo();
+            else                       sfx_step();
         }
     }
 

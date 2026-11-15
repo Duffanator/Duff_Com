@@ -446,6 +446,33 @@ static void build_procedural_fallbacks(void) {
         ph += 6.2831853 * (f + 22.0 * sin(t * 68.0)) / SFX_SAMPLE_RATE;
         g_sfx[SFX_ID_CIV_SCREAM_F].pcm[i] = clamp_u8((int)((sin(ph) * 58.0 + sin(ph * 2.0) * 42.0 + sin(ph * 3.0) * 20.0 + noise_s8() * 0.16) * env));
     }
+
+    /* 19. QUAD-COPTER DRONE MOTOR & ROTOR CHOP */
+    n = 2100; alloc_proc_sfx(SFX_ID_DRONE_QUAD, n);
+    {
+        int lp = 0;
+        ph = 0.0;
+        for (i = 0; i < n && g_sfx[SFX_ID_DRONE_QUAD].pcm; i++) {
+            double t = (double)i / SFX_SAMPLE_RATE;
+            double env = sin(3.14159 * (double)i / n);
+            double chop = 0.65 + 0.35 * sin(6.2831853 * 38.0 * t);
+            double f = 195.0 + 35.0 * sin(3.14159 * (double)i / n);
+            ph += 6.2831853 * f / SFX_SAMPLE_RATE;
+            lp = (lp * 3 + noise_s8()) / 4;
+            g_sfx[SFX_ID_DRONE_QUAD].pcm[i] = clamp_u8((int)(((sin(ph) * 42.0 + sin(ph * 2.0) * 34.0 + sin(ph * 4.0) * 18.0) * chop + lp * 0.35) * env));
+        }
+    }
+
+    /* 20. UFO DRONE ALIEN ANTI-GRAV THRUSTER PULSE */
+    n = 2300; alloc_proc_sfx(SFX_ID_DRONE_UFO, n);
+    ph = 0.0;
+    for (i = 0; i < n && g_sfx[SFX_ID_DRONE_UFO].pcm; i++) {
+        double t = (double)i / SFX_SAMPLE_RATE;
+        double env = sin(3.14159 * (double)i / n);
+        double f = 128.0 + 48.0 * sin(3.14159 * (double)i / n) + 22.0 * sin(6.2831853 * 28.0 * t);
+        ph += 6.2831853 * f / SFX_SAMPLE_RATE;
+        g_sfx[SFX_ID_DRONE_UFO].pcm[i] = clamp_u8((int)((sin(ph + 1.4 * sin(ph * 2.0)) * 58.0 + sin(ph * 4.5) * 24.0 + noise_s8() * 0.14) * env));
+    }
 }
 
 static void load_wav_overrides(void) {
@@ -467,7 +494,9 @@ static void load_wav_overrides(void) {
         "FEMDIE.WAV",
         "ALERT.WAV",
         "CIVSCRM.WAV",
-        "CIVSCRF.WAV"
+        "CIVSCRF.WAV",
+        "DRONQUAD.WAV",
+        "DRONUFO.WAV"
     };
     int i;
     for (i = 0; i < SFX_COUNT; i++) {
@@ -580,6 +609,8 @@ void sound_play(int sfx_id) {
         case SFX_ID_ALERT:       sfx_beep(880, 30); break;
         case SFX_ID_CIV_SCREAM_M:sfx_beep(520, 55); break;
         case SFX_ID_CIV_SCREAM_F:sfx_beep(940, 55); break;
+        case SFX_ID_DRONE_QUAD:  sfx_beep(280, 14); break;
+        case SFX_ID_DRONE_UFO:   sfx_beep(175, 16); break;
     }
 }
 
@@ -618,9 +649,11 @@ void sfx_beep(int freq_hz, int duration_ms) {
     }
 }
 
-void sfx_click(void)     { sound_play(SFX_ID_CLICK); }
-void sfx_step(void)      { step_toggle ^= 1; sound_play(step_toggle ? SFX_ID_STEP_A : SFX_ID_STEP_B); }
-void sfx_door(void)      { sound_play(SFX_ID_DOOR); }
+void sfx_click(void)      { sound_play(SFX_ID_CLICK); }
+void sfx_step(void)       { step_toggle ^= 1; sound_play(step_toggle ? SFX_ID_STEP_A : SFX_ID_STEP_B); }
+void sfx_drone_quad(void) { sound_play(SFX_ID_DRONE_QUAD); }
+void sfx_drone_ufo(void)  { sound_play(SFX_ID_DRONE_UFO); }
+void sfx_door(void)       { sound_play(SFX_ID_DOOR); }
 void sfx_rifle(void)     { sound_play(SFX_ID_RIFLE); }
 void sfx_laser(void)     { sound_play(SFX_ID_LASER); }
 void sfx_plasma(void)    { sound_play(SFX_ID_PLASMA); }
