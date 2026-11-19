@@ -62,3 +62,11 @@ Desktop.ini
 *.swp
 *~
 /.vs/
+
+# New art pipeline (source images + packing tools)
+!/tools/art/
+!/tools/art/**
+
+# Original X-COM art used for personal reference/local builds - NEVER commit (copyrighted)
+/orig_assets/
+/assets_xcom/

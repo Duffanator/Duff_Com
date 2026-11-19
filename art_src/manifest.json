@@ -1,0 +1,309 @@
+﻿{
+    "units":  [
+                  {
+                      "id":  "op_male_visor",
+                      "type":  0,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "stand":  "soldier_male_visor_stand_raw.jpg",
+                      "kneel":  "soldier_male_visor_kneel_raw.jpg",
+                      "walkA":  "soldier_male_visor_walkA_raw.jpg",
+                      "walkB":  "soldier_male_visor_walkB_raw.jpg",
+                      "mirror":  {
+                                     "kneel":  "5:3"
+                                 }
+                  },
+                  {
+                      "id":  "op_male_blonde",
+                      "type":  1,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "stand":  "op_male_blonde_stand_raw.jpg",
+                      "kneel":  "op_male_blonde_kneel_raw.jpg",
+                      "walkA":  "op_male_blonde_walkA_raw.jpg",
+                      "walkB":  "@stand",
+                      "mirror":  {
+                                     "kneel":  "5:3"
+                                 }
+                  },
+                  {
+                      "id":  "op_male_vet",
+                      "type":  2,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "stand":  "op_male_vet_stand_raw.jpg",
+                      "kneel":  "op_male_vet_kneel_raw.jpg",
+                      "walkA":  "op_male_vet_walkA_raw.jpg",
+                      "walkB":  "@stand",
+                      "mirror":  {
+                                     "kneel":  "5:3"
+                                 }
+                  },
+                  {
+                      "id":  "op_fem_red",
+                      "type":  3,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "stand":  "op_fem_red_stand_raw.jpg",
+                      "kneel":  "op_fem_red_kneel_raw.jpg",
+                      "walkA":  "op_fem_red_walkA_raw.jpg",
+                      "walkB":  "@stand",
+                      "mirror":  {
+                                     "kneel":  "5:3"
+                                 }
+                  },
+                  {
+                      "id":  "op_fem_dark",
+                      "type":  5,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "stand":  "op_fem_dark_stand_raw.jpg",
+                      "kneel":  "op_fem_dark_kneel_raw.jpg",
+                      "walkA":  "op_fem_dark_walkA_raw.jpg",
+                      "walkB":  "@stand",
+                      "mirror":  {
+                                     "kneel":  "5:3"
+                                 }
+                  },
+                  {
+                      "id":  "op_fem_blonde",
+                      "type":  4,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "stand":  "op_fem_blonde_stand_raw.jpg",
+                      "kneel":  "op_fem_blonde_kneel_raw.jpg",
+                      "walkA":  "op_fem_blonde_walkA_raw.jpg",
+                      "walkB":  "@stand",
+                      "mirror":  {
+                                     "kneel":  "5:3"
+                                 }
+                  },
+                  {
+                      "id":  "civ_male",
+                      "type":  9,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "cellMargin":  6,
+                      "stand":  "civ_male_stand_raw.jpg",
+                      "mirror":  {
+                                     "stand":  "3:3,5:5",
+                                     "walkA":  "3:3,5:5"
+                                 },
+                      "walkA":  "civ_male_walkA_raw.jpg"
+                  },
+                  {
+                      "id":  "civ_fem",
+                      "type":  12,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "cellMargin":  6,
+                      "stand":  "civ_fem_stand_raw.jpg",
+                      "walkA":  "civ_fem_walkA_raw.jpg",
+                      "mirror":  {
+                                     "stand":  "5:5",
+                                     "walkA":  "5:5"
+                                 }
+                  },
+                  {
+                      "id":  "quad_drone",
+                      "type":  17,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "cellMargin":  6,
+                      "bottomMargin":  7,
+                      "stand":  "quad_drone_stand_raw.jpg"
+                  },
+                  {
+                      "id":  "ufo_drone",
+                      "type":  18,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "cellMargin":  8,
+                      "bottomMargin":  7,
+                      "stand":  "ufo_drone_stand_raw.jpg",
+                      "mirror":  {
+                                     "stand":  "3:3"
+                                 }
+                  },
+                  {
+                      "id":  "civ_male_flan",
+                      "type":  10,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "cellMargin":  6,
+                      "stand":  "civ_male_flan_stand_raw.jpg",
+                      "walkA":  "civ_male_flan_walkA_fixed.png",
+                      "mirror":  {
+                                     "stand":  "3:3,5:5",
+                                     "walkA":  "3:3,5:5"
+                                 }
+                  },
+                  {
+                      "id":  "civ_male_work",
+                      "type":  11,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "cellMargin":  6,
+                      "stand":  "civ_male_work_stand_raw.jpg",
+                      "mirror":  {
+                                     "stand":  "3:3,5:5"
+                                 }
+                  },
+                  {
+                      "id":  "civ_fem_blonde",
+                      "type":  13,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "cellMargin":  6,
+                      "stand":  "civ_fem_blonde_stand_raw.jpg",
+                      "mirror":  {
+                                     "stand":  "5:5"
+                                 }
+                  },
+                  {
+                      "id":  "civ_fem_dark",
+                      "type":  14,
+                      "dir":  "art_src/units",
+                      "fit":  0.84,
+                      "cellMargin":  6,
+                      "stand":  "civ_fem_dark_stand_raw.jpg",
+                      "walkA":  "civ_fem_dark_walkA_raw.jpg",
+                      "mirror":  {
+                                     "stand":  "5:5",
+                                     "walkA":  "5:5"
+                                 }
+                  }
+              ],
+    "floors":  [
+                   {
+                       "src":  "art_src/floors/floors_raw.jpg",
+                       "cols":  4,
+                       "rows":  2,
+                       "ids":  "1,2,3,4,5,6,7,8",
+                       "zoom":  1.5,
+                       "contrast":  1.3,
+                       "saturation":  1.25,
+                       "brightness":  14
+                   },
+                   {
+                       "src":  "art_src/floors/floors_C_raw.jpg",
+                       "cols":  4,
+                       "rows":  1,
+                       "ids":  "9,16,17,18",
+                       "zoom":  1,
+                       "contrast":  1.2,
+                       "saturation":  1.15,
+                       "brightness":  8
+                   }
+               ],
+    "deaths":  [
+                   {
+                       "id":  "op_male_visor_death",
+                       "type":  0,
+                       "dir":  "art_src/units",
+                       "src":  "op_male_visor_death_clean.png",
+                       "fit":  0.84,
+                       "cellMargin":  4
+                   },
+                   {
+                       "id":  "op_male_blonde_death",
+                       "type":  1,
+                       "dir":  "art_src/units",
+                       "src":  "op_male_blonde_death_clean.png",
+                       "fit":  0.84,
+                       "cellMargin":  4
+                   },
+                   {
+                       "id":  "op_male_vet_death",
+                       "type":  2,
+                       "dir":  "art_src/units",
+                       "src":  "op_male_vet_death_clean.png",
+                       "fit":  0.84,
+                       "cellMargin":  4
+                   },
+                   {
+                       "id":  "op_fem_red_death",
+                       "type":  3,
+                       "dir":  "art_src/units",
+                       "src":  "op_fem_red_death_clean.png",
+                       "fit":  0.84,
+                       "cellMargin":  4
+                   },
+                   {
+                       "id":  "op_fem_blonde_death",
+                       "type":  4,
+                       "dir":  "art_src/units",
+                       "src":  "op_fem_blonde_death_clean.png",
+                       "fit":  0.84,
+                       "cellMargin":  4
+                   },
+                   {
+                       "id":  "op_fem_dark_death",
+                       "type":  5,
+                       "dir":  "art_src/units",
+                       "src":  "op_fem_dark_death_clean.png",
+                       "fit":  0.84,
+                       "cellMargin":  4
+                   },
+                   {
+                       "id":  "zombie_death",
+                       "type":  16,
+                       "dir":  "art_src/units",
+                       "src":  "zombie_death_clean.png",
+                       "fit":  0.8
+                   }
+               ],
+    "rotateCells":  1,
+    "walls":  [
+                  {
+                      "src":  "art_src/walls/walls_A_raw.jpg",
+                      "cols":  4,
+                      "rows":  2,
+                      "ids":  "1,2,3,4,5,6,7,8",
+                      "inset":  0.03
+                  },
+                  {
+                      "src":  "art_src/walls/walls_B_raw.jpg",
+                      "cols":  4,
+                      "rows":  2,
+                      "ids":  "9,10,11,12,13,14,15,16",
+                      "inset":  0.03
+                  }
+              ],
+    "objects":  [
+                    {
+                        "src":  "art_src/props/objects_A_raw.jpg",
+                        "cols":  4,
+                        "rows":  2,
+                        "injectCols":  "1,2,3,4,5,8,9,10",
+                        "fit":  0.92,
+                        "bottomMargin":  2
+                    },
+                    {
+                        "src":  "art_src/props/objects_B_raw.jpg",
+                        "cols":  2,
+                        "rows":  1,
+                        "injectCols":  "11,12",
+                        "fit":  0.62,
+                        "bottomMargin":  2
+                    }
+                ],
+    "vehicles":  [
+                     {
+                         "src":  "art_src/vehicles/vehicles_raw.jpg",
+                         "cols":  2,
+                         "rows":  2,
+                         "kindsFile":  "art_src/vehicle_kinds.json"
+                     }
+                 ],
+    "procDeaths":  [
+                       {
+                           "types":  "9,10,11,12,13,14",
+                           "mode":  "human"
+                       },
+                       {
+                           "types":  "17,18",
+                           "mode":  "drone"
+                       }
+                   ]
+}

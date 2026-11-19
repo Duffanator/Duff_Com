@@ -37,6 +37,12 @@ if exist SAVE1.SAV if not exist dist\SAVE1.SAV copy /Y *.SAV dist\ >nul
 if exist SAVE1.SAV if not exist build\SAVE1.SAV copy /Y *.SAV build\ >nul
 copy /Y assets\*.* dist\assets\ >nul
 copy /Y assets\*.* build\assets\ >nul
+rem Optional local-only overlay: original X-COM art imported by tools\art\pack_xcom.ps1 (gitignored, not in the repo).
+if exist assets_xcom\*.BMP (
+    echo     Applying local X-COM art overlay from assets_xcom\
+    copy /Y assets_xcom\*.BMP dist\assets\ >nul
+    copy /Y assets_xcom\*.BMP build\assets\ >nul
+)
 
 echo [2/2] Launching DUFFCOM.EXE in DOSBox-X...
 "%DOS_DIR%\dosbox-x\dosbox-x.exe" -conf "%~dp0dosbox-duffcom.conf" -fastlaunch -exit "%~dp0dist\DUFFCOM.EXE"
